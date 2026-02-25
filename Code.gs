@@ -175,6 +175,17 @@ function plantosListLocations() {
   return Object.keys(set).sort((a, b) => a.localeCompare(b));
 }
 
+function plantosCountPlants() {
+  const invInfo = getInventory_();
+  const data = invInfo.sheet.getDataRange().getValues();
+  const h = invInfo.h;
+  let count = 0;
+  data.slice(1).forEach(r => {
+    if (String(r[h[CFG.HEADERS.UID]] || '').trim()) count++;
+  });
+  return { ok: true, count };
+}
+
 function plantosGetPlantsByLocation(location) {
   const loc = String(location || '').trim();
   const invInfo = getInventory_();
