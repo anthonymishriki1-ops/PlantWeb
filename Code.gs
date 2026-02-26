@@ -40,9 +40,11 @@ const CFG = {
 /** WEB APP ROUTING **/
 function doGet(e) {
   const q = (e && e.parameter) || {};
-  const mode = String(q.mode || 'home').trim().toLowerCase();
-
   const raw = String(q.uid || q.pid || q.id || '').trim();
+  const modeParam = String(q.mode || '').trim().toLowerCase();
+  // QR plant links always include uid; if mode is missing, treat as plant page.
+  const mode = modeParam || (raw ? 'plant' : 'home');
+
   const loc = String(q.loc || '').trim();
   const openAdd = String(q.openAdd || '').trim();
 
@@ -63,15 +65,9 @@ function doGet(e) {
       .setTitle('PlantOS');
   }
 
-  const template = HtmlService.createTemplateFromFile('App');
-  template.baseUrl = baseUrl;
-  template.mode = mode;
-  template.uid = uid;
-  template.raw = raw;
-  template.loc = loc;
-  template.openAdd = openAdd;
-
-  return template.evaluate()
+  // This UI is a static HTML app (no server-side template scriptlets),
+  // so serve it directly to avoid template parsing edge cases.
+  return HtmlService.createHtmlOutputFromFile('App')
     .setTitle('PlantOS')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
@@ -930,7 +926,7 @@ function ensurePlantQr_(uid) {
   const qrPlants = DriveApp.getFolderById(tree.qrPlantsId);
 
   const baseUrl = getBaseUrl_();
-  const url = baseUrl ? `${baseUrl}?uid=${encodeURIComponent(uid)}` : String(uid);
+  const url = baseUrl ? `${baseUrl}?mode=plant&uid=${encodeURIComponent(uid)}` : String(uid);
 
   const fileName = `Plant_${uid}.png`;
   const file = upsertQrPng_(qrPlants, fileName, url);
