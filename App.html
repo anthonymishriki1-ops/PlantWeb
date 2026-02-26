@@ -1,0 +1,1189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PlantOS</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Pixelify+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body, #root { width: 100%; height: 100%; overflow: hidden; }
+
+    /* rolling ticker */
+    @keyframes marquee {
+      0% { transform: translateX(100%); }
+      100% { transform: translateX(-100%); }
+    }
+    .ticker-track {
+      display: inline-block;
+      white-space: nowrap;
+      padding-left: 100%;
+      animation: marquee 18s linear infinite;
+    }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+  window.PLANTOS_BOOT = {
+    baseUrl: <?= JSON.stringify(baseUrl || '') ?>,
+    mode: <?= JSON.stringify(mode || 'home') ?>,
+    uid: <?= JSON.stringify(uid || '') ?>,
+    loc: <?= JSON.stringify(loc || '') ?>,
+    openAdd: <?= JSON.stringify(openAdd || '') ?>
+  };
+</script>
+
+<script type="text/babel">
+const { useState, useEffect, createContext, useContext } = React;
+const BOOT = window.PLANTOS_BOOT || {};
+
+function gasCall(fn, ...args) {
+  return new Promise((resolve, reject) => {
+    if (!(window.google && google.script && google.script.run && typeof google.script.run[fn] === "function")) {
+      reject(new Error("Apps Script runtime unavailable"));
+      return;
+    }
+    google.script.run
+      .withSuccessHandler(resolve)
+      .withFailureHandler((err) => reject(new Error((err && err.message) || String(err))))[fn](...args);
+  });
+}
+
+function useScreenSize() {
+  const [screenSize, setScreenSize] = useState(() => {
+    const w = window.innerWidth, h = window.innerHeight;
+    return { w, h, isSmall: w < 640 };
+  });
+  useEffect(() => {
+    const on = () => setScreenSize({ w: window.innerWidth, h: window.innerHeight, isSmall: window.innerWidth < 640 });
+    window.addEventListener('resize', on);
+    window.addEventListener('orientationchange', on);
+    return () => { window.removeEventListener('resize', on); window.removeEventListener('orientationchange', on); };
+  }, []);
+  return screenSize;
+}
+
+function format12h(date) {
+  return date.toLocaleString('en-US', {
+    weekday:'short', month:'short', day:'numeric',
+    hour:'numeric', minute:'2-digit', second:'2-digit',
+    hour12:true
+  });
+}
+
+/* ===================== NAV ===================== */
+const NavigationContext = createContext(undefined);
+
+function NavigationProvider({ children }) {
+  const start = (() => {
+    const openAdd = String(BOOT.openAdd || '').trim().toLowerCase();
+    if (openAdd === 'basic' || openAdd === '1') return 'add-basic';
+    if (openAdd === 'advanced') return 'add-advanced';
+    if (BOOT.uid) return 'plant';
+    const modeMap = { home:'home', locations:'locations', log:'plant-log', spec:'spec', plant:'plant', watering:'watering', quicklog:'quick-log' };
+    return modeMap[String(BOOT.mode||'home')] || 'home';
+  })();
+
+  const [currentScreen, setCurrentScreen] = useState(start);
+  const [history, setHistory] = useState([start]);
+
+  const navigate = (screen) => { setCurrentScreen(screen); setHistory(prev => [...prev, screen]); };
+  const goBack = () => {
+    if (history.length > 1) {
+      const h = [...history]; h.pop();
+      setHistory(h);
+      setCurrentScreen(h[h.length - 1]);
+    }
+  };
+
+  return (
+    <NavigationContext.Provider value={{ currentScreen, navigate, goBack }}>
+      {children}
+    </NavigationContext.Provider>
+  );
+}
+
+function useNavigation() {
+  const ctx = useContext(NavigationContext);
+  if (!ctx) throw new Error('useNavigation must be used within NavigationProvider');
+  return ctx;
+}
+
+/* ===================== DATA ===================== */
+const PlantDataContext = createContext(undefined);
+
+function PlantDataProvider({ children }) {
+  const [locations, setLocations] = useState([]);
+  const [homeData, setHomeData] = useState(null);
+
+  useEffect(() => {
+    gasCall('plantosListLocations').then(setLocations).catch(() => setLocations([]));
+    gasCall('plantosHome').then(setHomeData).catch(() => setHomeData(null));
+  }, []);
+
+  const refreshHome = async () => {
+    const d = await gasCall('plantosHome');
+    setHomeData(d);
+    return d;
+  };
+
+  const getPlantsByLocation = (location) => gasCall('plantosGetPlantsByLocation', location);
+  const getPlant = (uid) => gasCall('plantosGetPlant', uid).then(res => (res && res.ok ? res.plant : null));
+  const setNickname = (uid, nickname) => gasCall('plantosSetNickname', uid, nickname);
+
+  const createPlant = (payload) => gasCall('plantosCreatePlant', payload);
+  const updatePlant = (uid, patch) => gasCall('plantosUpdatePlant', uid, patch || {});
+  const quickLog = (uid, payload) => gasCall('plantosQuickLog', uid, payload || {});
+  const batchWater = (uids) => gasCall('plantosBatchWater', uids || []);
+
+  const getRecentLog = (limit) => gasCall('plantosGetRecentLog', limit || 25);
+  const getTimeline = (uid, limit) => gasCall('plantosGetTimeline', uid, limit || 30);
+  const search = (q, limit) => gasCall('plantosSearch', q, limit || 15);
+
+  return (
+    <PlantDataContext.Provider value={{
+      locations, homeData, refreshHome,
+      getPlantsByLocation, getPlant, getTimeline, getRecentLog,
+      createPlant, updatePlant, setNickname,
+      quickLog, batchWater, search
+    }}>
+      {children}
+    </PlantDataContext.Provider>
+  );
+}
+
+function usePlantData() {
+  const ctx = useContext(PlantDataContext);
+  if (!ctx) throw new Error('usePlantData must be used within PlantDataProvider');
+  return ctx;
+}
+
+/* ===================== UI COMPONENTS ===================== */
+function PlantButton({ children, variant='primary', onClick, disabled=false, className='' }) {
+  const base = "px-4 py-3 rounded-lg border-4 transition-all duration-150 font-semibold";
+  const styles = {
+    primary: "bg-[#8BB55C] border-[#6B9C3D] text-[#2A4A1A] shadow hover:scale-105",
+    secondary: "bg-[#7BB5CC] border-[#5A8C9D] text-[#1A3A4A] shadow hover:scale-105",
+    ghost: "bg-transparent border-[#C8B488] text-[#4A3020] hover:bg-[#E8D4A8]"
+  };
+  const dis = "opacity-50 cursor-not-allowed hover:scale-100";
+  return (
+    <button onClick={onClick} disabled={disabled}
+      className={`${base} ${styles[variant]} ${disabled ? dis : 'cursor-pointer'} ${className}`}
+      style={{ fontFamily: "'Pixelify Sans', cursive" }}>
+      {children}
+    </button>
+  );
+}
+
+function PlantCard({ children, title, className='' }) {
+  return (
+    <div className={`bg-gradient-to-b from-[#F4E4C1] to-[#E8D4A8] rounded-xl border-8 border-[#6B4423] shadow-lg p-4 ${className}`}>
+      {title && (
+        <h3 className="text-[#4A3020] mb-3 pb-2 border-b-4 border-[#C8B488]"
+          style={{ fontFamily: "'Press Start 2P', cursive", fontSize: '14px' }}>
+          {title}
+        </h3>
+      )}
+      {children}
+    </div>
+  );
+}
+
+function StatusMessage({ type, message }) {
+  const colors = {
+    success: 'bg-[#6B9C3D] border-[#5A8C2D] text-white',
+    error: 'bg-[#E74C3C] border-[#C0392B] text-white',
+    info: 'bg-[#3498DB] border-[#2980B9] text-white',
+    loading: 'bg-[#F39C12] border-[#E67E22] text-white'
+  };
+  const icons = { success:'✓', error:'✗', info:'ℹ', loading:'⏳' };
+  return (
+    <div className={`${colors[type]} border-4 rounded-lg px-4 py-3 mb-4 flex items-center gap-3 shadow-lg`}>
+      <span className="text-2xl">{icons[type]}</span>
+      <span style={{ fontFamily: "'Pixelify Sans', cursive", fontSize:'14px', fontWeight:'600' }}>{message}</span>
+    </div>
+  );
+}
+
+function Field({ label, value, onChange, placeholder='', type='text' }) {
+  return (
+    <div className="mb-3">
+      <div className="mb-1 text-[#4A3020]" style={{ fontFamily:"'Pixelify Sans', cursive", fontWeight:800 }}>
+        {label}
+      </div>
+      {type === 'textarea' ? (
+        <textarea className="w-full px-3 py-2 bg-white border-4 border-[#8B4513] rounded-lg"
+          style={{ fontFamily:"'Pixelify Sans', cursive" }}
+          rows={3} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} />
+      ) : (
+        <input className="w-full px-3 py-2 bg-white border-4 border-[#8B4513] rounded-lg"
+          style={{ fontFamily:"'Pixelify Sans', cursive" }}
+          value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} />
+      )}
+    </div>
+  );
+}
+
+/* ===================== SCREENS ===================== */
+
+function HomeScreen() {
+  const { navigate } = useNavigation();
+  const { homeData, refreshHome } = usePlantData();
+  const { isSmall } = useScreenSize();
+
+  useEffect(() => { refreshHome().catch(()=>{}); }, []);
+
+  const dueNow = (homeData && homeData.dueNow) ? homeData.dueNow : [];
+  const upcoming = (homeData && homeData.upcoming) ? homeData.upcoming : [];
+  const birthdays = (homeData && homeData.birthdays) ? homeData.birthdays : [];
+
+  return (
+    <div className={`h-full flex flex-col ${isSmall ? 'p-3' : 'p-4'} max-w-2xl mx-auto w-full`}>
+      <PlantCard className="mb-4">
+        <div className="text-center">
+          <h2 className="text-[#4A3020] mb-2"
+            style={{ fontFamily: "'Press Start 2P', cursive", fontSize: isSmall ? '14px' : '16px' }}>
+            PlantOS
+          </h2>
+
+          {birthdays.length > 0 && (
+            <div className="mt-2 bg-[#fff3cd] border-2 border-[#ffc107] rounded-lg px-3 py-2"
+              style={{ fontFamily: "'Pixelify Sans', cursive", fontSize: '12px' }}>
+              🎂 Todays birthdays: {birthdays.join(', ')}
+            </div>
+          )}
+
+          {dueNow.length > 0 && (
+            <div className="mt-3 bg-[#fde8e7] border-2 border-[#e74c3c] rounded-lg px-3 py-2 text-left">
+              <p style={{ fontFamily: "'Pixelify Sans', cursive", fontSize: '12px', fontWeight: 900, color:'#c0392b' }}>
+                💧 Needs watering now:
+              </p>
+              {dueNow.slice(0, 6).map(p => (
+                <div key={p.uid} className="flex justify-between"
+                  style={{ fontFamily: "'Pixelify Sans', cursive", fontSize:'11px', color:'#4A3020' }}>
+                  <span>{p.primary}</span>
+                  <span className="text-[#e74c3c]">{p.due}</span>
+                </div>
+              ))}
+              {dueNow.length > 6 && (
+                <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'11px', color:'#6B4423' }}>
+                  +{dueNow.length - 6} more
+                </div>
+              )}
+            </div>
+          )}
+
+          {dueNow.length === 0 && upcoming.length > 0 && (
+            <div className="mt-3 bg-[#eef9ef] border-2 border-[#6B9C3D] rounded-lg px-3 py-2 text-left">
+              <p style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', fontWeight:900, color:'#2A4A1A' }}>
+                ✅ Nothing due right now. Next up:
+              </p>
+              {upcoming.slice(0, 4).map(p => (
+                <div key={p.uid} className="flex justify-between"
+                  style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'11px', color:'#4A3020' }}>
+                  <span>{p.primary}</span>
+                  <span className="text-[#2A4A1A]">{p.due}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </PlantCard>
+
+      <PlantCard title="MAIN MENU" className="flex-1">
+        <div className="space-y-3">
+          <PlantButton onClick={() => navigate('watering')}>💧 Watering Dashboard</PlantButton>
+          <PlantButton onClick={() => navigate('quick-log')}>⚡ Quick Log</PlantButton>
+
+          <div className="grid grid-cols-2 gap-2">
+            <PlantButton onClick={() => navigate('add-basic')}>🌱 Add (Basic)</PlantButton>
+            <PlantButton onClick={() => navigate('add-advanced')} variant="secondary">🧬 Add (Advanced)</PlantButton>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <PlantButton onClick={() => navigate('locations')}>📍 Locations</PlantButton>
+            <PlantButton onClick={() => navigate('plant-log')} variant="secondary">📋 Plant Log</PlantButton>
+          </div>
+
+          <PlantButton onClick={() => navigate('spec')} variant="ghost">📖 Spec</PlantButton>
+        </div>
+      </PlantCard>
+    </div>
+  );
+}
+
+function AddBasicScreen() {
+  const { goBack, navigate } = useNavigation();
+  const { locations, createPlant, refreshHome } = usePlantData();
+  const { isSmall } = useScreenSize();
+
+  const [nickname, setNickname] = useState('');
+  const [classification, setClassification] = useState('');
+  const [genus, setGenus] = useState('');
+  const [species, setSpecies] = useState('');
+  const [location, setLocation] = useState(BOOT.loc || (locations[0] || 'Unsorted'));
+  const [potSize, setPotSize] = useState('');
+  const [substrate, setSubstrate] = useState('');
+  const [reminderEnabled, setReminderEnabled] = useState(true);
+  const [everyDays, setEveryDays] = useState('7');
+
+  const [state, setState] = useState('default');
+  const [created, setCreated] = useState('');
+
+  async function submit() {
+    if (!location.trim()) return;
+    setState('loading');
+    try {
+      const res = await createPlant({
+        nickname, classification, genus, species, location,
+        potSize, substrate,
+        reminderEnabled,
+        everyDays: Number(everyDays || 0)
+      });
+      if (res && res.ok) {
+        setCreated(res.uid);
+        await refreshHome();
+        setState('success');
+      } else {
+        setState('error');
+      }
+    } catch {
+      setState('error');
+    }
+  }
+
+  return (
+    <div className={`h-full flex flex-col ${isSmall ? 'p-3' : 'p-4'} overflow-y-auto max-w-2xl mx-auto w-full`}>
+      <PlantCard title="ADD SPECIMEN (BASIC)">
+        {state === 'loading' && <StatusMessage type="loading" message="Creating..." />}
+        {state === 'error' && <StatusMessage type="error" message="Failed to create" />}
+        {state === 'success' && (
+          <>
+            <StatusMessage type="success" message="Created ✅" />
+            <div className="bg-white p-3 rounded-lg border-4 border-[#6B9C3D] mb-3">
+              <div style={{ fontFamily:"'Press Start 2P', cursive", fontSize:'12px', color:'#4A3020' }}>
+                UID {created}
+              </div>
+            </div>
+            <PlantButton onClick={() => navigate('home')}>Back Home</PlantButton>
+          </>
+        )}
+
+        {state !== 'success' && (
+          <>
+            <Field label="Nick-name (what you want to see)" value={nickname} onChange={setNickname} placeholder="e.g., Wendy Williams" />
+            <Field label="Classification" value={classification} onChange={setClassification} placeholder="e.g., Cactaceae" />
+            <Field label="Genus" value={genus} onChange={setGenus} placeholder="e.g., Lophophora" />
+            <Field label="Species" value={species} onChange={setSpecies} placeholder="e.g., williamsii" />
+
+            <Field label="Location" value={location} onChange={setLocation} placeholder="e.g., Living Room" />
+            <Field label="Pot Size" value={potSize} onChange={setPotSize} placeholder="e.g., 4 inch" />
+            <Field label="Substrate" value={substrate} onChange={setSubstrate} placeholder="e.g., pumice + lava + sand" />
+
+            <div className="mb-3 bg-white p-3 rounded-lg border-4 border-[#8B4513]">
+              <div className="flex items-center justify-between">
+                <div style={{ fontFamily:"'Pixelify Sans', cursive", fontWeight:900, color:'#4A3020' }}>
+                  Water Reminder
+                </div>
+                <input type="checkbox" checked={reminderEnabled} onChange={e => setReminderEnabled(e.target.checked)} />
+              </div>
+              <div className="mt-2">
+                <Field label="Water how often? (days)" value={everyDays} onChange={setEveryDays} placeholder="e.g., 7" />
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <PlantButton onClick={submit}>Save</PlantButton>
+              <PlantButton variant="ghost" onClick={goBack}>Back</PlantButton>
+            </div>
+          </>
+        )}
+      </PlantCard>
+    </div>
+  );
+}
+
+function AddAdvancedScreen() {
+  const { goBack, navigate } = useNavigation();
+  const { createPlant, refreshHome } = usePlantData();
+  const { isSmall } = useScreenSize();
+
+  const [displayName, setDisplayName] = useState('');
+  const [nickname, setNickname] = useState('');
+  const [plantId, setPlantId] = useState('');
+  const [name, setName] = useState('');
+
+  const [classification, setClassification] = useState('');
+  const [genus, setGenus] = useState('');
+  const [species, setSpecies] = useState('');
+
+  const [location, setLocation] = useState('Unsorted');
+  const [potSize, setPotSize] = useState('');
+  const [substrate, setSubstrate] = useState('');
+  const [medium, setMedium] = useState('');
+  const [birthday, setBirthday] = useState('');
+  const [notes, setNotes] = useState('');
+
+  const [reminderEnabled, setReminderEnabled] = useState(true);
+  const [everyDays, setEveryDays] = useState('7');
+
+  const [state, setState] = useState('default');
+  const [created, setCreated] = useState('');
+
+  async function submit() {
+    setState('loading');
+    try {
+      const res = await createPlant({
+        displayName, nickname, plantId, name,
+        classification, genus, species,
+        location, potSize, substrate, medium,
+        birthday, notes,
+        reminderEnabled, everyDays: Number(everyDays || 0)
+      });
+      if (res && res.ok) {
+        setCreated(res.uid);
+        await refreshHome();
+        setState('success');
+      } else setState('error');
+    } catch {
+      setState('error');
+    }
+  }
+
+  return (
+    <div className={`h-full flex flex-col ${isSmall ? 'p-3' : 'p-4'} overflow-y-auto max-w-2xl mx-auto w-full`}>
+      <PlantCard title="ADD SPECIMEN (ADVANCED)">
+        {state === 'loading' && <StatusMessage type="loading" message="Creating..." />}
+        {state === 'error' && <StatusMessage type="error" message="Failed to create" />}
+        {state === 'success' && (
+          <>
+            <StatusMessage type="success" message="Created ✅" />
+            <div className="bg-white p-3 rounded-lg border-4 border-[#6B9C3D] mb-3">
+              <div style={{ fontFamily:"'Press Start 2P', cursive", fontSize:'12px', color:'#4A3020' }}>
+                UID {created}
+              </div>
+            </div>
+            <PlantButton onClick={() => navigate('home')}>Back Home</PlantButton>
+          </>
+        )}
+
+        {state !== 'success' && (
+          <>
+            <Field label="Nick-name" value={nickname} onChange={setNickname} />
+            <Field label="Display Name" value={displayName} onChange={setDisplayName} />
+            <Field label="Plant ID (optional, human)" value={plantId} onChange={setPlantId} />
+            <Field label="Name (optional)" value={name} onChange={setName} />
+
+            <Field label="Classification" value={classification} onChange={setClassification} />
+            <Field label="Genus" value={genus} onChange={setGenus} />
+            <Field label="Species" value={species} onChange={setSpecies} />
+
+            <Field label="Location" value={location} onChange={setLocation} />
+            <Field label="Pot Size" value={potSize} onChange={setPotSize} />
+            <Field label="Substrate" value={substrate} onChange={setSubstrate} />
+            <Field label="Medium" value={medium} onChange={setMedium} />
+            <Field label="Birthday (yyyy-mm-dd)" value={birthday} onChange={setBirthday} />
+            <Field label="Notes" value={notes} onChange={setNotes} type="textarea" />
+
+            <div className="mb-3 bg-white p-3 rounded-lg border-4 border-[#8B4513]">
+              <div className="flex items-center justify-between">
+                <div style={{ fontFamily:"'Pixelify Sans', cursive", fontWeight:900, color:'#4A3020' }}>
+                  Water Reminder
+                </div>
+                <input type="checkbox" checked={reminderEnabled} onChange={e => setReminderEnabled(e.target.checked)} />
+              </div>
+              <div className="mt-2">
+                <Field label="Water how often? (days)" value={everyDays} onChange={setEveryDays} placeholder="e.g., 7" />
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <PlantButton onClick={submit}>Save</PlantButton>
+              <PlantButton variant="ghost" onClick={goBack}>Back</PlantButton>
+            </div>
+          </>
+        )}
+      </PlantCard>
+    </div>
+  );
+}
+
+function WateringScreen() {
+  const { goBack, navigate } = useNavigation();
+  const { homeData, refreshHome, batchWater } = usePlantData();
+  const { isSmall } = useScreenSize();
+  const [msg, setMsg] = useState(null);
+
+  useEffect(() => { refreshHome().catch(()=>{}); }, []);
+
+  const dueNow = (homeData && homeData.dueNow) ? homeData.dueNow : [];
+  const upcoming = (homeData && homeData.upcoming) ? homeData.upcoming : [];
+
+  async function waterAll() {
+    const uids = dueNow.map(x => x.uid);
+    if (!uids.length) return;
+    setMsg({ type:'loading', text:'Batch watering...' });
+    try {
+      await batchWater(uids);
+      await refreshHome();
+      setMsg({ type:'success', text:'Done ✅' });
+    } catch {
+      setMsg({ type:'error', text:'Failed' });
+    }
+    setTimeout(()=> setMsg(null), 1500);
+  }
+
+  return (
+    <div className={`h-full flex flex-col ${isSmall ? 'p-3' : 'p-4'} overflow-y-auto max-w-2xl mx-auto w-full`}>
+      <PlantCard title="WATERING DASHBOARD">
+        {msg && <StatusMessage type={msg.type} message={msg.text} />}
+
+        <div className="mb-3 bg-white p-3 rounded-lg border-4 border-[#e74c3c]">
+          <div style={{ fontFamily:"'Pixelify Sans', cursive", fontWeight:900, color:'#c0392b' }}>
+            Due Now: {dueNow.length}
+          </div>
+          <div className="mt-2 space-y-2">
+            {dueNow.map(p => (
+              <button key={p.uid}
+                onClick={() => { window.location.href = `${BOOT.baseUrl}?mode=plant&uid=${encodeURIComponent(p.uid)}`; }}
+                className="w-full text-left bg-[#fff] p-3 rounded-lg border-4 border-[#8B4513] hover:border-[#6B9C3D] transition-all">
+                <div className="flex justify-between">
+                  <div>
+                    <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'14px', fontWeight:900, color:'#4A3020' }}>
+                      {p.primary}
+                    </div>
+                    <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', color:'#6B4423' }}>
+                      {p.secondary || ''}
+                    </div>
+                  </div>
+                  <div style={{ fontFamily:"'Press Start 2P', cursive", fontSize:'10px', color:'#e74c3c' }}>
+                    {p.due}
+                  </div>
+                </div>
+              </button>
+            ))}
+            {dueNow.length === 0 && (
+              <div style={{ fontFamily:"'Pixelify Sans', cursive", color:'#4A3020' }}>Nothing due right now 🎉</div>
+            )}
+          </div>
+
+          <div className="mt-3">
+            <PlantButton onClick={waterAll} disabled={!dueNow.length}>💧 Water All Due</PlantButton>
+          </div>
+        </div>
+
+        <div className="mb-3 bg-white p-3 rounded-lg border-4 border-[#6B9C3D]">
+          <div style={{ fontFamily:"'Pixelify Sans', cursive", fontWeight:900, color:'#2A4A1A' }}>
+            Upcoming (7 days): {upcoming.length}
+          </div>
+          <div className="mt-2 space-y-2">
+            {upcoming.map(p => (
+              <div key={p.uid} className="bg-[#fff] p-2 rounded-lg border-2 border-[#C8B488]">
+                <div className="flex justify-between">
+                  <div style={{ fontFamily:"'Pixelify Sans', cursive", fontWeight:900, color:'#4A3020' }}>{p.primary}</div>
+                  <div style={{ fontFamily:"'Pixelify Sans', cursive", color:'#4A3020' }}>{p.due}</div>
+                </div>
+              </div>
+            ))}
+            {upcoming.length === 0 && (
+              <div style={{ fontFamily:"'Pixelify Sans', cursive", color:'#4A3020' }}>No upcoming reminders.</div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex gap-2">
+          <PlantButton variant="ghost" onClick={goBack}>Back</PlantButton>
+          <PlantButton variant="secondary" onClick={() => navigate('home')}>Home</PlantButton>
+        </div>
+      </PlantCard>
+    </div>
+  );
+}
+
+function QuickLogScreen() {
+  const { goBack } = useNavigation();
+  const { search, quickLog, refreshHome } = usePlantData();
+  const { isSmall } = useScreenSize();
+
+  const [q, setQ] = useState('');
+  const [hits, setHits] = useState([]);
+  const [picked, setPicked] = useState(null);
+
+  const [water, setWater] = useState(true);
+  const [fertilize, setFertilize] = useState(false);
+  const [repot, setRepot] = useState(false);
+  const [potSize, setPotSize] = useState('');
+  const [substrate, setSubstrate] = useState('');
+  const [medium, setMedium] = useState('');
+  const [notes, setNotes] = useState('');
+
+  const [msg, setMsg] = useState(null);
+
+  async function doSearch() {
+    if (!q.trim()) { setHits([]); return; }
+    const res = await search(q, 20);
+    setHits(res || []);
+  }
+
+  async function submit() {
+    if (!picked) return;
+    setMsg({ type:'loading', text:'Saving...' });
+    try {
+      await quickLog(picked.uid, { water, fertilize, repot, potSize, substrate, medium, notes });
+      await refreshHome();
+      setMsg({ type:'success', text:'Saved ✅' });
+      setNotes('');
+    } catch {
+      setMsg({ type:'error', text:'Failed' });
+    }
+    setTimeout(()=> setMsg(null), 1500);
+  }
+
+  return (
+    <div className={`h-full flex flex-col ${isSmall ? 'p-3' : 'p-4'} overflow-y-auto max-w-2xl mx-auto w-full`}>
+      <PlantCard title="QUICK LOG">
+        {msg && <StatusMessage type={msg.type} message={msg.text} />}
+
+        <Field label="Find a plant" value={q} onChange={setQ} placeholder="Search nickname, genus, species..." />
+        <PlantButton onClick={doSearch} variant="secondary">Search</PlantButton>
+
+        {hits.length > 0 && (
+          <div className="mt-3 space-y-2 max-h-48 overflow-y-auto">
+            {hits.map(h => (
+              <button key={h.uid}
+                onClick={() => setPicked(h)}
+                className={`w-full text-left bg-white p-3 rounded-lg border-4 ${picked && picked.uid === h.uid ? 'border-[#6B9C3D]' : 'border-[#8B4513]'}`}>
+                <div style={{ fontFamily:"'Pixelify Sans', cursive", fontWeight:900, color:'#4A3020' }}>{h.primary}</div>
+                <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', color:'#6B4423' }}>{h.genus} {h.species}</div>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {picked && (
+          <div className="mt-4 bg-white p-3 rounded-lg border-4 border-[#6B9C3D]">
+            <div style={{ fontFamily:"'Pixelify Sans', cursive", fontWeight:900, color:'#4A3020' }}>Logging for: {picked.primary}</div>
+
+            <div className="mt-3 space-y-2">
+              <label className="flex items-center gap-2" style={{ fontFamily:"'Pixelify Sans', cursive" }}>
+                <input type="checkbox" checked={water} onChange={e => setWater(e.target.checked)} />
+                💧 Watered
+              </label>
+              <label className="flex items-center gap-2" style={{ fontFamily:"'Pixelify Sans', cursive" }}>
+                <input type="checkbox" checked={fertilize} onChange={e => setFertilize(e.target.checked)} />
+                🌾 Fertilized
+              </label>
+              <label className="flex items-center gap-2" style={{ fontFamily:"'Pixelify Sans', cursive" }}>
+                <input type="checkbox" checked={repot} onChange={e => setRepot(e.target.checked)} />
+                🪴 Repotted
+              </label>
+            </div>
+
+            {repot && (
+              <div className="mt-3">
+                <Field label="Pot Size" value={potSize} onChange={setPotSize} />
+                <Field label="Substrate" value={substrate} onChange={setSubstrate} />
+                <Field label="Medium" value={medium} onChange={setMedium} />
+              </div>
+            )}
+
+            <Field label="Notes (optional)" value={notes} onChange={setNotes} type="textarea" />
+
+            <div className="mt-2">
+              <PlantButton onClick={submit}>Save Log</PlantButton>
+            </div>
+          </div>
+        )}
+
+        <div className="mt-4">
+          <PlantButton variant="ghost" onClick={goBack}>Back</PlantButton>
+        </div>
+      </PlantCard>
+    </div>
+  );
+}
+
+function LocationsScreen() {
+  const { goBack, navigate } = useNavigation();
+  const { locations, getPlantsByLocation, setNickname } = usePlantData();
+  const { isSmall } = useScreenSize();
+
+  const [selected, setSelected] = useState(BOOT.loc || (locations[0] || ''));
+  const [plants, setPlants] = useState([]);
+  const [state, setState] = useState('default');
+  const [msg, setMsg] = useState(null);
+
+  async function refresh(loc) {
+    if (!loc) return;
+    setState('loading');
+    try {
+      const rows = await getPlantsByLocation(loc);
+      setPlants(rows || []);
+      setState('default');
+    } catch {
+      setState('error');
+    }
+  }
+
+  useEffect(() => {
+    if (!selected && locations.length) setSelected(locations[0]);
+  }, [locations]);
+
+  useEffect(() => { if (selected) refresh(selected); }, [selected]);
+
+  const opts = (locations.length ? locations : [selected]).filter(Boolean);
+
+  const waterStatus = (enabled, due) => {
+    if (!enabled) return { t: 'No reminder', c: '#999' };
+    if (!due) return { t: 'No due', c: '#999' };
+    const d = new Date(due);
+    const today = new Date(); today.setHours(0,0,0,0);
+    if (d <= today) return { t: 'Needs water 💧', c: '#e74c3c' };
+    const diff = Math.ceil((d - today) / 86400000);
+    if (diff <= 3) return { t: `Due in ${diff}d`, c: '#e67e22' };
+    return { t: `Due ${due}`, c: '#27ae60' };
+  };
+
+  async function addNick(p) {
+    const nn = prompt('Nickname for this plant:', '');
+    if (!nn) return;
+    setMsg({ type:'loading', text:'Saving nickname...' });
+    try {
+      await setNickname(p.uid, nn);
+      await refresh(selected);
+      setMsg({ type:'success', text:'Saved ✅' });
+    } catch {
+      setMsg({ type:'error', text:'Failed' });
+    }
+    setTimeout(()=> setMsg(null), 1500);
+  }
+
+  return (
+    <div className={`h-full flex flex-col ${isSmall ? 'p-3' : 'p-4'} overflow-y-auto max-w-2xl mx-auto w-full`}>
+      <PlantCard title="LOCATIONS">
+        {msg && <StatusMessage type={msg.type} message={msg.text} />}
+        {state === 'loading' && <StatusMessage type="loading" message="Loading..." />}
+        {state === 'error' && <StatusMessage type="error" message="Failed to load plants" />}
+
+        <div className="mb-3">
+          <label className="block mb-2 text-[#4A3020]" style={{ fontFamily: "'Pixelify Sans', cursive", fontWeight: 900 }}>
+            Select Location
+          </label>
+          <select value={selected} onChange={e => setSelected(e.target.value)}
+            className="w-full px-3 py-2 bg-white border-4 border-[#8B4513] rounded-lg"
+            style={{ fontFamily: "'Pixelify Sans', cursive" }}>
+            {opts.map(l => <option key={l} value={l}>{l}</option>)}
+          </select>
+        </div>
+
+        <div className="space-y-2 max-h-96 overflow-y-auto">
+          {plants.map(p => {
+            const ws = waterStatus(p.reminderEnabled, p.due);
+            return (
+              <div key={p.uid} className="w-full bg-white p-3 rounded-lg border-4 border-[#8B4513]">
+                <button
+                  onClick={() => { window.location.href = `${BOOT.baseUrl}?mode=plant&uid=${encodeURIComponent(p.uid)}`; }}
+                  className="w-full text-left">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <div className="text-[#4A3020]" style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'14px', fontWeight:900 }}>
+                        {p.primary}
+                      </div>
+                      {p.secondary && (
+                        <div className="text-[#6B4423]" style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', fontWeight:700 }}>
+                          {p.secondary}
+                        </div>
+                      )}
+                      {p.meta && (
+                        <div className="text-[#6B4423]" style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'11px' }}>
+                          {p.meta}
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'11px', color: ws.c, fontWeight:900 }}>{ws.t}</div>
+                      <div style={{ fontFamily:"'Press Start 2P', cursive", fontSize:'9px', color:'#999' }}>UID {p.uid}</div>
+                    </div>
+                  </div>
+                </button>
+
+                {/* Only for missing nickname */}
+                {p.needsNickname && (
+                  <div className="mt-2">
+                    <PlantButton variant="ghost" onClick={() => addNick(p)}>Add a nickname?</PlantButton>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="mt-4 flex gap-2">
+          <PlantButton variant="ghost" onClick={goBack}>Back</PlantButton>
+          <PlantButton variant="secondary" onClick={() => navigate('home')}>Home</PlantButton>
+        </div>
+      </PlantCard>
+    </div>
+  );
+}
+
+function PlantLogScreen() {
+  const { goBack } = useNavigation();
+  const { getRecentLog } = usePlantData();
+  const { isSmall } = useScreenSize();
+  const [rows, setRows] = useState([]);
+  const [state, setState] = useState('loading');
+
+  useEffect(() => {
+    getRecentLog(25).then(r => { setRows(r || []); setState('default'); }).catch(()=> setState('error'));
+  }, []);
+
+  return (
+    <div className={`h-full flex flex-col ${isSmall ? 'p-3' : 'p-4'} overflow-y-auto max-w-2xl mx-auto w-full`}>
+      <PlantCard title="PLANT LOG">
+        {state === 'loading' && <StatusMessage type="loading" message="Loading..." />}
+        {state === 'error' && <StatusMessage type="error" message="Failed to load log" />}
+
+        <div className="space-y-2 max-h-96 overflow-y-auto">
+          {rows.map((r, i) => (
+            <div key={i} className="bg-white p-3 rounded-lg border-4 border-[#8B4513]">
+              <div className="flex justify-between">
+                <div style={{ fontFamily:"'Press Start 2P', cursive", fontSize:'10px', color:'#4A3020' }}>{r.action}</div>
+                <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'11px', color:'#6B4423' }}>{r.ts}</div>
+              </div>
+              {r.details && <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', color:'#4A3020' }}>{r.details}</div>}
+              <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'10px', color:'#999' }}>UID {r.uid}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4">
+          <PlantButton variant="ghost" onClick={goBack}>Back</PlantButton>
+        </div>
+      </PlantCard>
+    </div>
+  );
+}
+
+function PlantScreen() {
+  const { navigate } = useNavigation();
+  const { getPlant, getTimeline, quickLog, updatePlant, setNickname } = usePlantData();
+  const { isSmall } = useScreenSize();
+
+  const [plant, setPlant] = useState(null);
+  const [timeline, setTimeline] = useState([]);
+  const [state, setState] = useState('loading');
+  const [msg, setMsg] = useState(null);
+
+  const uid = BOOT.uid;
+
+  async function load() {
+    if (!uid) { setState('error'); return; }
+    try {
+      const p = await getPlant(uid);
+      if (!p) { setState('error'); return; }
+      setPlant(p);
+      setState('default');
+      const tl = await getTimeline(uid, 20);
+      setTimeline(tl || []);
+    } catch {
+      setState('error');
+    }
+  }
+
+  useEffect(() => { load(); }, []);
+
+  async function doWater() {
+    if (!plant) return;
+    setMsg({ type:'loading', text:'Saving...' });
+    try {
+      await quickLog(plant.uid, { water:true, fertilize:false, repot:false, notes:'' });
+      await load();
+      setMsg({ type:'success', text:'Saved ✅' });
+    } catch {
+      setMsg({ type:'error', text:'Failed' });
+    }
+    setTimeout(()=> setMsg(null), 1500);
+  }
+
+  async function doFert() {
+    if (!plant) return;
+    setMsg({ type:'loading', text:'Saving...' });
+    try {
+      await quickLog(plant.uid, { water:false, fertilize:true, repot:false, notes:'' });
+      await load();
+      setMsg({ type:'success', text:'Saved ✅' });
+    } catch {
+      setMsg({ type:'error', text:'Failed' });
+    }
+    setTimeout(()=> setMsg(null), 1500);
+  }
+
+  async function doRepot() {
+    if (!plant) return;
+    const pot = prompt('Pot size?', plant.potSize || '');
+    if (pot == null) return;
+    const sub = prompt('Substrate?', plant.substrate || plant.medium || '');
+    if (sub == null) return;
+    setMsg({ type:'loading', text:'Saving...' });
+    try {
+      await quickLog(plant.uid, { repot:true, potSize: pot, substrate: sub, notes:'' });
+      await updatePlant(plant.uid, { potSize: pot, substrate: sub });
+      await load();
+      setMsg({ type:'success', text:'Saved ✅' });
+    } catch {
+      setMsg({ type:'error', text:'Failed' });
+    }
+    setTimeout(()=> setMsg(null), 1500);
+  }
+
+  async function addNick() {
+    if (!plant) return;
+    const nn = prompt('Nickname:', '');
+    if (!nn) return;
+    setMsg({ type:'loading', text:'Saving nickname...' });
+    try {
+      await setNickname(plant.uid, nn);
+      await load();
+      setMsg({ type:'success', text:'Saved ✅' });
+    } catch {
+      setMsg({ type:'error', text:'Failed' });
+    }
+    setTimeout(()=> setMsg(null), 1500);
+  }
+
+  async function edit() {
+    if (!plant) return;
+    const nn = prompt('Nick-name:', plant.nickname || '');
+    if (nn == null) return;
+    const cls = prompt('Classification:', plant.classification || '');
+    if (cls == null) return;
+    const g = prompt('Genus:', plant.genus || '');
+    if (g == null) return;
+    const sp = prompt('Species:', plant.species || '');
+    if (sp == null) return;
+    const every = prompt('Water how often? (days):', plant.everyDays || '');
+    if (every == null) return;
+
+    setMsg({ type:'loading', text:'Saving...' });
+    try {
+      await updatePlant(plant.uid, { nickname: nn, classification: cls, genus: g, species: sp, everyDays: every, recomputeDue:true });
+      await load();
+      setMsg({ type:'success', text:'Saved ✅' });
+    } catch {
+      setMsg({ type:'error', text:'Failed' });
+    }
+    setTimeout(()=> setMsg(null), 1500);
+  }
+
+  return (
+    <div className={`h-full flex flex-col ${isSmall ? 'p-3' : 'p-4'} overflow-y-auto max-w-2xl mx-auto w-full`}>
+      <PlantCard title="PLANT PAGE">
+        {state === 'loading' && <StatusMessage type="loading" message="Loading specimen..." />}
+        {state === 'error' && <StatusMessage type="error" message="Plant not found" />}
+        {msg && <StatusMessage type={msg.type} message={msg.text} />}
+
+        {plant && (
+          <>
+            <div className="bg-white p-3 rounded-lg border-4 border-[#6B9C3D] mb-3">
+              <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'18px', fontWeight:900, color:'#4A3020' }}>
+                {plant.nickname || plant.primary}
+              </div>
+              <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', color:'#6B4423', fontWeight:800 }}>
+                {[plant.classification, plant.gs].filter(Boolean).join(' • ')}
+              </div>
+              <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'11px', color:'#999' }}>
+                {plant.humanPlantId ? `Plant ID: ${plant.humanPlantId} • ` : ''}UID {plant.uid}
+              </div>
+
+              {!plant.nickname && (
+                <div className="mt-2">
+                  <PlantButton variant="ghost" onClick={addNick}>Add a nickname?</PlantButton>
+                </div>
+              )}
+            </div>
+
+            <div className="bg-white p-3 rounded-lg border-4 border-[#8B4513] mb-3">
+              <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', color:'#4A3020' }}>
+                🎂 Birthday: {plant.birthday || '—'}
+              </div>
+              <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', color:'#4A3020' }}>
+                💧 Last Watered: {plant.lastWatered || '—'} • Next Due: {plant.due || '—'} • Every: {plant.everyDays || '—'}d
+              </div>
+              <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', color:'#4A3020' }}>
+                🌾 Last Fertilized: {plant.lastFertilized || '—'}
+              </div>
+              <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', color:'#4A3020' }}>
+                🪴 Pot: {plant.potSize || '—'} • Substrate: {plant.substrate || plant.medium || '—'}
+              </div>
+              {plant.careDocUrl && (
+                <div className="mt-2">
+                  <a href={plant.careDocUrl} target="_blank" style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', color:'#2980b9', fontWeight:900 }}>
+                    📄 Open Care Log Doc
+                  </a>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2 mb-4">
+              <PlantButton onClick={doWater}>💧 Watered</PlantButton>
+              <PlantButton onClick={doFert}>🌾 Fertilized</PlantButton>
+              <PlantButton onClick={doRepot}>🪴 Repot</PlantButton>
+              <PlantButton variant="secondary" onClick={edit}>✏️ Edit</PlantButton>
+              <PlantButton variant="ghost" onClick={() => navigate('home')}>Home</PlantButton>
+            </div>
+
+            <div className="bg-white p-3 rounded-lg border-4 border-[#C8B488]">
+              <div style={{ fontFamily:"'Pixelify Sans', cursive", fontWeight:900, color:'#4A3020' }}>
+                Recent Timeline
+              </div>
+              <div className="mt-2 space-y-2 max-h-48 overflow-y-auto">
+                {timeline.map((t, i) => (
+                  <div key={i} className="border-b border-[#eee] pb-1">
+                    <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'11px', color:'#6B4423' }}>{t.ts}</div>
+                    <div style={{ fontFamily:"'Press Start 2P', cursive", fontSize:'10px', color:'#4A3020' }}>{t.action}</div>
+                    {t.details && <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', color:'#4A3020' }}>{t.details}</div>}
+                  </div>
+                ))}
+                {timeline.length === 0 && (
+                  <div style={{ fontFamily:"'Pixelify Sans', cursive", color:'#4A3020' }}>No entries yet.</div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+      </PlantCard>
+    </div>
+  );
+}
+
+function SpecScreen() {
+  const { goBack } = useNavigation();
+  const { isSmall } = useScreenSize();
+  return (
+    <div className={`h-full flex flex-col ${isSmall ? 'p-3' : 'p-4'} overflow-y-auto max-w-2xl mx-auto w-full`}>
+      <PlantCard title="SPEC">
+        <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', color:'#4A3020' }}>
+          QR opens Plant Page:
+          <br/>?mode=plant&uid=########
+          <br/><br/>Display order everywhere:
+          <br/>Nick-name → (Display/Name fallback) → Genus Species → UID (last)
+          <br/><br/>Location list shows DOB + Pot/Substrate.
+          <br/>Duplicates auto-number as #2, #3 when no nickname.
+        </div>
+        <div className="mt-4">
+          <PlantButton variant="ghost" onClick={goBack}>Back</PlantButton>
+        </div>
+      </PlantCard>
+    </div>
+  );
+}
+
+/* ===================== ROLLING TICKER ===================== */
+function Ticker() {
+  const { homeData } = usePlantData();
+  const [now, setNow] = useState(new Date());
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const birthdays = (homeData && homeData.birthdays) ? homeData.birthdays : [];
+  const dueNow = (homeData && homeData.dueNow) ? homeData.dueNow : [];
+
+  const msg = [
+    format12h(now),
+    birthdays.length ? `Todays birthdays: ${birthdays.join(', ')}` : `No birthdays today`,
+    dueNow.length ? `Needs water: ${dueNow.length}` : `No plants due now`
+  ].join('   •   ');
+
+  return (
+    <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 w-[92%] max-w-2xl overflow-hidden">
+      <div className="bg-[#6B4423] text-[#F4E4C1] border-4 border-[#4A3020] rounded-xl px-4 py-2 shadow-lg">
+        <div className="ticker-track" style={{ fontFamily:"'Press Start 2P', cursive", fontSize:'10px' }}>
+          {msg}   •   {msg}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ===================== APP SHELL ===================== */
+function AppContent() {
+  const { currentScreen, navigate } = useNavigation();
+
+  const render = () => {
+    switch (currentScreen) {
+      case 'home': return <HomeScreen />;
+      case 'watering': return <WateringScreen />;
+      case 'quick-log': return <QuickLogScreen />;
+      case 'add-basic': return <AddBasicScreen />;
+      case 'add-advanced': return <AddAdvancedScreen />;
+      case 'locations': return <LocationsScreen />;
+      case 'plant-log': return <PlantLogScreen />;
+      case 'plant': return <PlantScreen />;
+      case 'spec': return <SpecScreen />;
+      default: return <HomeScreen />;
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-full relative overflow-hidden">
+      <div className="absolute inset-0 bg-[#8BC34A]">
+        <div className="absolute inset-0 opacity-20" style={{
+          backgroundImage: `repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.1) 2px,rgba(0,0,0,0.1) 4px),
+                           repeating-linear-gradient(90deg,transparent,transparent 2px,rgba(0,0,0,0.1) 2px,rgba(0,0,0,0.1) 4px)`
+        }} />
+        <div className="absolute bottom-20 left-[10%] text-4xl">🌻</div>
+        <div className="absolute bottom-32 left-[25%] text-3xl">🌷</div>
+        <div className="absolute bottom-24 right-[15%] text-4xl">🌺</div>
+        <div className="absolute bottom-40 right-[30%] text-3xl">🌼</div>
+        <div className="absolute top-20 left-[20%] text-2xl">🦋</div>
+        <div className="absolute top-32 right-[25%] text-2xl">🐝</div>
+        <div className="absolute top-8 right-8 w-16 h-16 bg-[#FFD700] rounded-full border-4 border-[#FFA500] shadow-lg"></div>
+      </div>
+
+      {currentScreen !== 'home' && (
+        <div className="absolute top-4 left-4 z-20">
+          <PlantButton onClick={() => navigate('home')} variant="secondary" className="px-3 py-2">
+            🏠 Home
+          </PlantButton>
+        </div>
+      )}
+
+      <div className="flex-1 flex items-center justify-center relative z-10 overflow-auto py-8">
+        {render()}
+      </div>
+
+      <Ticker />
+    </div>
+  );
+}
+
+function PlantOSApp() {
+  return (
+    <NavigationProvider>
+      <PlantDataProvider>
+        <AppContent />
+      </PlantDataProvider>
+    </NavigationProvider>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<PlantOSApp />);
+</script>
+</body>
+</html>
