@@ -1,788 +1,1189 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PlantOS - Plant Management System</title>
-    
-    <!-- Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Pixelify+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    
-    <!-- Tailwind CSS CDN -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    
-    <!-- React and ReactDOM -->
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    
-    
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        html, body, #root {
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-        }
-        
-        @keyframes gentle-sway {
-            0%, 100% { transform: rotate(-2deg); }
-            50% { transform: rotate(2deg); }
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PlantOS</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Pixelify+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body, #root { width: 100%; height: 100%; overflow: hidden; }
+
+    /* rolling ticker */
+    @keyframes marquee {
+      0% { transform: translateX(100%); }
+      100% { transform: translateX(-100%); }
+    }
+    .ticker-track {
+      display: inline-block;
+      white-space: nowrap;
+      padding-left: 100%;
+      animation: marquee 18s linear infinite;
+    }
+  </style>
 </head>
 <body>
-    <div id="root"></div>
+<div id="root"></div>
 
-    <script>
-        window.PLANTOS_BOOT = {
-            baseUrl: <?= JSON.stringify(baseUrl || "") ?>,
-            mode: <?= JSON.stringify(mode || "home") ?>,
-            uid: <?= JSON.stringify(uid || "") ?>,
-            loc: <?= JSON.stringify(loc || "") ?>,
-            openAdd: <?= JSON.stringify(openAdd || "") ?>
-        };
-    </script>
+<script>
+  window.PLANTOS_BOOT = {
+    baseUrl: <?= JSON.stringify(baseUrl || '') ?>,
+    mode: <?= JSON.stringify(mode || 'home') ?>,
+    uid: <?= JSON.stringify(uid || '') ?>,
+    loc: <?= JSON.stringify(loc || '') ?>,
+    openAdd: <?= JSON.stringify(openAdd || '') ?>
+  };
+</script>
 
-    <script>
+<script type="text/babel">
 const { useState, useEffect, createContext, useContext } = React;
-// ============ HOOKS ============
-function useScreenSize() {
-    const [screenSize, setScreenSize] = useState(() => {
-        const width = window.innerWidth;
-        const height = window.innerHeight;
-        return {
-            width,
-            height,
-            isSmall: width < 640,
-            isMedium: width >= 640 && width < 1024,
-            isLarge: width >= 1024,
-            isPortrait: height > width,
-            isLandscape: width > height
-        };
-    });
-    useEffect(() => {
-        const handleResize = () => {
-            const width = window.innerWidth;
-            const height = window.innerHeight;
-            setScreenSize({
-                width,
-                height,
-                isSmall: width < 640,
-                isMedium: width >= 640 && width < 1024,
-                isLarge: width >= 1024,
-                isPortrait: height > width,
-                isLandscape: width > height
-            });
-        };
-        window.addEventListener('resize', handleResize);
-        window.addEventListener('orientationchange', handleResize);
-        return () => {
-            window.removeEventListener('resize', handleResize);
-            window.removeEventListener('orientationchange', handleResize);
-        };
-    }, []);
-    return screenSize;
-}
-// ============ CONTEXTS ============
-const NavigationContext = createContext(undefined);
 const BOOT = window.PLANTOS_BOOT || {};
-function gasCall(fn, ...args) {
-    return new Promise((resolve, reject) => {
-        if (typeof google === "undefined" || !google.script || !google.script.run || !google.script.run[fn]) {
-            reject(new Error('google.script.run unavailable: ' + fn));
-            return;
-        }
-        google.script.run
-            .withSuccessHandler(resolve)
-            .withFailureHandler((err) => reject(new Error((err && err.message) || String(err))))[fn](...args);
-    });
-}
-function bootScreen_() {
-    const mode = String(BOOT.mode || 'home').toLowerCase();
-    if (BOOT.uid)
-        return 'plant-scan';
-    if (String(BOOT.openAdd || '') === '1')
-        return 'add-plant';
-    const map = { home: 'home', locations: 'locations', search: 'plant-scan', log: 'plant-log', settings: 'spec' };
-    return map[mode] || 'splash';
-}
-function NavigationProvider({ children }) {
-    const initial = bootScreen_();
-    const [currentScreen, setCurrentScreen] = useState(initial);
-    const [history, setHistory] = useState([initial]);
-    const navigate = (screen) => {
-        setCurrentScreen(screen);
-        setHistory(prev => [...prev, screen]);
-    };
-    const goBack = () => {
-        if (history.length > 1) {
-            const newHistory = [...history];
-            newHistory.pop();
-            const previousScreen = newHistory[newHistory.length - 1];
-            setCurrentScreen(previousScreen);
-            setHistory(newHistory);
-        }
-    };
-    return (React.createElement(NavigationContext.Provider, { value: { currentScreen, navigate, goBack, history } }, children));
-}
-function useNavigation() {
-    const context = useContext(NavigationContext);
-    if (!context) {
-        throw new Error('useNavigation must be used within NavigationProvider');
-    }
-    return context;
-}
-const PlantDataContext = createContext(undefined);
-function PlantDataProvider({ children }) {
-    const [locations, setLocations] = useState([]);
-    const [plantCount, setPlantCount] = useState(0);
-    const refreshLocations = async () => {
-        const items = await gasCall('plantosListLocations');
-        setLocations(items || []);
-        return items || [];
-    };
-    const refreshPlantCount = async () => {
-        try {
-            const out = await gasCall('plantosCountPlants');
-            setPlantCount(Number(out && out.count || 0));
-        }
-        catch (e) {
-            setPlantCount(0);
-        }
-    };
-    useEffect(() => {
-        refreshLocations();
-        refreshPlantCount();
-    }, []);
-    const addPlant = async (plantData) => {
-        const payload = {
-            name: plantData.name,
-            location: plantData.location,
-            notes: '',
-            reminder: false,
-            every: 0,
-            birthday: ''
-        };
-        const result = await gasCall('plantosCreatePlant', payload);
-        await refreshPlantCount();
-        if (!locations.includes(payload.location))
-            await refreshLocations();
-        return result;
-    };
-    const getPlantsByLocation = async (location) => gasCall('plantosGetPlantsByLocation', location);
-    const getRecentLog = async (limit) => gasCall('plantosGetRecentLog', limit);
-    const getPlantByUid = async (uid) => gasCall('plantosGetPlantChart', uid);
-    const logPlantAction = async (uid, action, details) => gasCall('plantosLogPlantAction', uid, action, details || '');
-    const logPlantRepot = async (uid, pot, substrate) => gasCall('plantosLogPlantRepot', uid, pot, substrate);
-    const logPlantNote = async (uid, note) => gasCall('plantosLogPlantAction', uid, 'NOTE', note || '');
-    return (React.createElement(PlantDataContext.Provider, { value: {
-            plantCount,
-            locations,
-            refreshLocations,
-            addPlant,
-            getPlantsByLocation,
-            getRecentLog,
-            getPlantByUid,
-            logPlantAction,
-            logPlantRepot,
-            logPlantNote
-        } }, children));
-}
-function usePlantData() {
-    const context = useContext(PlantDataContext);
-    if (!context) {
-        throw new Error('usePlantData must be used within PlantDataProvider');
-    }
-    return context;
-}
-// ============ UI COMPONENTS ============
-function PlantButton({ children, variant = 'primary', onClick, disabled = false, className = '', selected = false }) {
-    const baseStyles = "px-4 py-3 rounded-lg border-4 transition-all duration-150 font-semibold relative overflow-hidden";
-    const variantStyles = {
-        primary: selected
-            ? "bg-[#6B9C3D] border-[#5A8C2D] text-white shadow-lg scale-105"
-            : "bg-[#8BB55C] border-[#6B9C3D] text-[#2A4A1A] shadow hover:scale-105",
-        secondary: selected
-            ? "bg-[#5A8C9D] border-[#4A7C8D] text-white shadow-lg scale-105"
-            : "bg-[#7BB5CC] border-[#5A8C9D] text-[#1A3A4A] shadow hover:scale-105",
-        ghost: selected
-            ? "bg-[#E8D4A8] border-[#C8B488] text-[#4A3020] shadow-lg scale-105"
-            : "bg-transparent border-[#C8B488] text-[#4A3020] hover:bg-[#E8D4A8]"
-    };
-    const disabledStyles = "opacity-50 cursor-not-allowed hover:scale-100";
-    return (React.createElement("button", { onClick: onClick, disabled: disabled, className: `${baseStyles} ${variantStyles[variant]} ${disabled ? disabledStyles : 'cursor-pointer'} ${className}`, style: { fontFamily: "'Pixelify Sans', cursive" } },
-        selected && (React.createElement("span", { className: "absolute right-3 top-1/2 -translate-y-1/2 text-xl animate-pulse" }, "\u25B6")),
-        children));
-}
-function PlantInput({ label, value, onChange, placeholder = '', disabled = false, error = '', type = 'text', required = false }) {
-    const handleChange = (e) => {
-        onChange(e.target.value);
-    };
-    const inputStyles = `w-full px-3 py-2 bg-white border-4 rounded-lg transition-all ${error ? 'border-[#E74C3C]' : 'border-[#8B4513] focus:border-[#6B9C3D]'} outline-none disabled:opacity-50 disabled:cursor-not-allowed`;
-    return (React.createElement("div", { className: "mb-4" },
-        React.createElement("label", { className: "block mb-2 text-[#4A3020]", style: { fontFamily: "'Pixelify Sans', cursive", fontSize: '14px', fontWeight: '600' } },
-            label,
-            " ",
-            required && React.createElement("span", { className: "text-[#E74C3C]" }, "*")),
-        type === 'textarea' ? (React.createElement("textarea", { value: value, onChange: handleChange, placeholder: placeholder, disabled: disabled, rows: 4, className: inputStyles, style: { fontFamily: "'Pixelify Sans', cursive", fontSize: '14px', resize: 'vertical' } })) : (React.createElement("input", { type: "text", value: value, onChange: handleChange, placeholder: placeholder, disabled: disabled, className: inputStyles, style: { fontFamily: "'Pixelify Sans', cursive", fontSize: '14px' } })),
-        error && (React.createElement("p", { className: "mt-1 text-[#E74C3C]", style: { fontFamily: "'Pixelify Sans', cursive", fontSize: '12px' } }, error))));
-}
-function PlantSelect({ label, value, onChange, options, disabled = false, error = '', required = false }) {
-    const handleChange = (e) => {
-        onChange(e.target.value);
-    };
-    return (React.createElement("div", { className: "mb-4" },
-        React.createElement("label", { className: "block mb-2 text-[#4A3020]", style: { fontFamily: "'Pixelify Sans', cursive", fontSize: '14px', fontWeight: '600' } },
-            label,
-            " ",
-            required && React.createElement("span", { className: "text-[#E74C3C]" }, "*")),
-        React.createElement("select", { value: value, onChange: handleChange, disabled: disabled, className: `w-full px-3 py-2 bg-white border-4 rounded-lg transition-all ${error ? 'border-[#E74C3C]' : 'border-[#8B4513] focus:border-[#6B9C3D]'} outline-none disabled:opacity-50 disabled:cursor-not-allowed`, style: { fontFamily: "'Pixelify Sans', cursive", fontSize: '14px' } }, options.map(opt => (React.createElement("option", { key: opt.value, value: opt.value }, opt.label)))),
-        error && (React.createElement("p", { className: "mt-1 text-[#E74C3C]", style: { fontFamily: "'Pixelify Sans', cursive", fontSize: '12px' } }, error))));
-}
-function PlantCard({ children, title, className = '' }) {
-    return (React.createElement("div", { className: `bg-gradient-to-b from-[#F4E4C1] to-[#E8D4A8] rounded-xl border-8 border-[#6B4423] shadow-lg p-4 ${className}` },
-        title && (React.createElement("h3", { className: "text-[#4A3020] mb-3 pb-2 border-b-4 border-[#C8B488]", style: { fontFamily: "'Press Start 2P', cursive", fontSize: '14px' } }, title)),
-        React.createElement("div", { className: "relative z-10" }, children)));
-}
-function StatusMessage({ type, message, onClose }) {
-    const colors = {
-        success: 'bg-[#6B9C3D] border-[#5A8C2D] text-white',
-        error: 'bg-[#E74C3C] border-[#C0392B] text-white',
-        info: 'bg-[#3498DB] border-[#2980B9] text-white',
-        loading: 'bg-[#F39C12] border-[#E67E22] text-white'
-    };
-    const icons = {
-        success: '✓',
-        error: '✗',
-        info: 'ℹ',
-        loading: '⏳'
-    };
-    return (React.createElement("div", { className: `${colors[type]} border-4 rounded-lg px-4 py-3 mb-4 flex items-center justify-between shadow-lg` },
-        React.createElement("div", { className: "flex items-center gap-3" },
-            React.createElement("span", { className: "text-2xl" }, icons[type]),
-            React.createElement("span", { style: { fontFamily: "'Pixelify Sans', cursive", fontSize: '14px', fontWeight: '600' } }, message)),
-        onClose && (React.createElement("button", { onClick: onClose, className: "text-xl hover:scale-110 transition-transform" }, "\u2715"))));
-}
-function TabBar({ tabs, activeTab, onTabChange }) {
-    return (React.createElement("div", { className: "flex bg-[#8B4513] rounded-lg border-4 border-[#6B4423] overflow-hidden mb-4" }, tabs.map((tab, index) => (React.createElement("button", { key: tab.id, onClick: () => onTabChange(tab.id), className: `flex-1 px-3 py-3 transition-all border-r-4 last:border-r-0 border-[#6B4423] ${activeTab === tab.id
-            ? 'bg-[#F4E4C1] text-[#4A3020]'
-            : 'bg-[#6B4423] text-[#C8B488] hover:bg-[#8B5533]'}`, style: { fontFamily: "'Pixelify Sans', cursive", fontSize: '12px', fontWeight: '600' } },
-        React.createElement("div", { className: "flex flex-col items-center gap-1" },
-            React.createElement("span", { className: "text-lg" }, tab.icon),
-            React.createElement("span", null, tab.label)))))));
-}
-// ============ SCREENS ============
-function SplashScreen() {
-    const { navigate } = useNavigation();
-    const { isSmall } = useScreenSize();
-    const handleStart = () => {
-        navigate('home');
-    };
-    return (React.createElement("div", { className: `h-full flex flex-col items-center justify-center ${isSmall ? 'p-4' : 'p-8'}` },
-        React.createElement("div", { className: `text-center ${isSmall ? 'mb-8' : 'mb-12'}` },
-            React.createElement("div", { className: `inline-block bg-[#8B4513] ${isSmall ? 'px-8 py-4' : 'px-12 py-6'} rounded-2xl border-4 border-[#654321] shadow-2xl` },
-                React.createElement("div", { className: "mb-4 text-6xl" }, "\uD83C\uDF3F"),
-                React.createElement("h1", { className: "text-[#6B9C3D] mb-2", style: {
-                        fontFamily: "'Press Start 2P', cursive",
-                        fontSize: isSmall ? '28px' : '36px',
-                        lineHeight: '1.6',
-                        textShadow: '4px 4px 0px #2A1810, -1px -1px 0px #8BB55C'
-                    } }, "PlantOS"),
-                React.createElement("p", { className: "text-[#F4E4C1]", style: {
-                        fontFamily: "'Pixelify Sans', cursive",
-                        fontSize: isSmall ? '13px' : '16px',
-                        fontWeight: '500'
-                    } }, "Plant Management System"))),
-        React.createElement(PlantButton, { onClick: handleStart, variant: "primary", className: isSmall ? 'px-10 py-4 text-base' : 'px-16 py-5 text-lg' },
-            React.createElement("span", { className: "flex items-center gap-3" },
-                React.createElement("span", null, "START"),
-                React.createElement("span", null, "\u25B6"))),
-        React.createElement("p", { className: `${isSmall ? 'mt-6' : 'mt-8'} text-[#2A1810] opacity-70 bg-[#F4E4C1]/60 px-3 py-1 rounded`, style: {
-                fontFamily: "'Press Start 2P', cursive",
-                fontSize: '8px'
-            } }, "v1.0.0")));
-}
-function HomeScreen() {
-    const { navigate } = useNavigation();
-    const { plantCount } = usePlantData();
-    const [selectedIndex, setSelectedIndex] = useState(0);
-    const { isSmall } = useScreenSize();
-    const menuOptions = [
-        { id: 'add', label: 'Add Plant', icon: '🌱', screen: 'add-plant' },
-        { id: 'locations', label: 'Locations', icon: '📍', screen: 'locations' },
-        { id: 'log', label: 'Plant Log', icon: '📋', screen: 'plant-log' },
-        { id: 'scan', label: 'Scan Plant', icon: '🔍', screen: 'plant-scan' },
-        { id: 'spec', label: 'View Spec', icon: '📖', screen: 'spec' }
-    ];
-    const handleSelect = (index) => {
-        setSelectedIndex(index);
-        navigate(menuOptions[index].screen);
-    };
-    return (React.createElement("div", { className: `h-full flex flex-col ${isSmall ? 'p-3' : 'p-4'} max-w-2xl mx-auto w-full` },
-        React.createElement(PlantCard, { className: "mb-4" },
-            React.createElement("div", { className: "text-center" },
-                React.createElement("h2", { className: "text-[#4A3020] mb-2", style: { fontFamily: "'Press Start 2P', cursive", fontSize: isSmall ? '14px' : '16px' } }, "Welcome to PlantOS"),
-                React.createElement("div", { className: `text-[#6B4423] flex items-center justify-center ${isSmall ? 'gap-2' : 'gap-4'}`, style: { fontFamily: "'Pixelify Sans', cursive", fontSize: isSmall ? '12px' : '14px', fontWeight: '600' } },
-                    React.createElement("div", { className: "flex items-center gap-2" },
-                        React.createElement("span", { className: isSmall ? 'text-xl' : 'text-2xl' }, "\uD83C\uDF3F"),
-                        React.createElement("span", null,
-                            plantCount,
-                            " Plants")),
-                    React.createElement("div", { className: "flex items-center gap-2" },
-                        React.createElement("span", { className: isSmall ? 'text-xl' : 'text-2xl' }, "\uD83D\uDC9A"),
-                        React.createElement("span", null, "All Healthy"))))),
-        React.createElement(PlantCard, { title: "MAIN MENU", className: "flex-1" },
-            React.createElement("div", { className: "space-y-3" }, menuOptions.map((option, index) => (React.createElement(PlantButton, { key: option.id, onClick: () => handleSelect(index), selected: selectedIndex === index, variant: "primary" },
-                React.createElement("div", { className: "flex items-center gap-3" },
-                    React.createElement("span", { className: "text-2xl" }, option.icon),
-                    React.createElement("span", null, option.label)))))))));
-}
-function AddPlantScreen() {
-    const { navigate, goBack } = useNavigation();
-    const { addPlant, locations } = usePlantData();
-    const { isSmall } = useScreenSize();
-    const [name, setName] = useState('');
-    const [location, setLocation] = useState('');
-    const [formState, setFormState] = useState('default');
-    const [createdUID, setCreatedUID] = useState('');
-    const [errors, setErrors] = useState({ name: '', location: '' });
-    useEffect(() => {
-        if (!location && locations.length) {
-            const bootLoc = String(BOOT.loc || '');
-            setLocation((bootLoc && locations.includes(bootLoc)) ? bootLoc : locations[0]);
-        }
-    }, [locations, location]);
-    const validateForm = () => {
-        const newErrors = { name: '', location: '' };
-        let isValid = true;
-        if (!name.trim()) {
-            newErrors.name = 'Display name is required';
-            isValid = false;
-        }
-        if (!location) {
-            newErrors.location = 'Location is required';
-            isValid = false;
-        }
-        setErrors(newErrors);
-        return isValid;
-    };
-    const handleSubmit = async () => {
-        if (!validateForm()) {
-            setFormState('error');
-            return;
-        }
-        setFormState('loading');
-        try {
-            const out = await addPlant({ name, location });
-            setCreatedUID((out && out.uid) || '');
-            setFormState('success');
-        }
-        catch (error) {
-            setFormState('error');
-        }
-    };
-    const handleReset = () => {
-        setName('');
-        setLocation(locations[0] || '');
-        setFormState('default');
-        setCreatedUID('');
-        setErrors({ name: '', location: '' });
-    };
-    const locationOptions = locations.map(loc => ({ value: loc, label: loc }));
-    return (React.createElement("div", { className: `h-full flex flex-col ${isSmall ? 'p-3' : 'p-4'} overflow-y-auto max-w-2xl mx-auto w-full` },
-        React.createElement(PlantCard, { title: "ADD NEW PLANT" },
-            formState === 'loading' && (React.createElement(StatusMessage, { type: "loading", message: "Creating specimen..." })),
-            formState === 'error' && (React.createElement(StatusMessage, { type: "error", message: "Please fix the errors below", onClose: () => setFormState('default') })),
-            formState === 'success' && (React.createElement(React.Fragment, null,
-                React.createElement(StatusMessage, { type: "success", message: `Plant created successfully!` }),
-                React.createElement("div", { className: "mb-4 p-4 bg-white rounded-lg border-4 border-[#6B9C3D]" },
-                    React.createElement("p", { className: "text-[#4A3020] mb-2", style: { fontFamily: "'Pixelify Sans', cursive", fontSize: '14px', fontWeight: '600' } }, "Generated Plant UID:"),
-                    React.createElement("p", { className: "text-[#6B9C3D] mb-4", style: { fontFamily: "'Press Start 2P', cursive", fontSize: '16px' } }, createdUID),
-                    React.createElement("div", { className: "space-y-2" },
-                        React.createElement(PlantButton, { onClick: () => { window.__PLANTOS_SCAN_UID = createdUID; navigate('plant-scan'); }, variant: "primary" }, "Open Scan"),
-                        React.createElement(PlantButton, { onClick: handleReset, variant: "secondary" }, "Add Another Plant"))))),
-            formState !== 'success' && (React.createElement(React.Fragment, null,
-                React.createElement(PlantInput, { label: "Display Name", value: name, onChange: setName, placeholder: "e.g., Sunny the Succulent", error: errors.name, required: true, disabled: formState === 'loading' }),
-                React.createElement(PlantSelect, { label: "Location", value: location, onChange: setLocation, options: locationOptions, error: errors.location, required: true, disabled: formState === 'loading' }),
-                React.createElement("div", { className: "space-y-2 mt-6" },
-                    React.createElement(PlantButton, { onClick: handleSubmit, variant: "primary", disabled: formState === 'loading' }, formState === 'loading' ? 'Creating...' : 'Create Specimen'),
-                    React.createElement(PlantButton, { onClick: goBack, variant: "ghost" }, "Cancel")))))));
-}
-function LocationsScreen() {
-    const { goBack, navigate } = useNavigation();
-    const { locations, refreshLocations, getPlantsByLocation } = usePlantData();
-    const { isSmall } = useScreenSize();
-    const [selectedLocation, setSelectedLocation] = useState('');
-    const [loadState, setLoadState] = useState('default');
-    const [plants, setPlants] = useState([]);
-    useEffect(() => {
-        if (!selectedLocation && locations.length) {
-            const bootLoc = String(BOOT.loc || '');
-            setSelectedLocation((bootLoc && locations.includes(bootLoc)) ? bootLoc : locations[0]);
-        }
-    }, [locations, selectedLocation]);
-    const loadPlants = async (loc) => {
-        if (!loc)
-            return;
-        setLoadState('loading');
-        try {
-            const rows = await getPlantsByLocation(loc);
-            setPlants(rows || []);
-            setLoadState('default');
-        }
-        catch (e) {
-            setLoadState('error');
-        }
-    };
-    useEffect(() => { loadPlants(selectedLocation); }, [selectedLocation]);
-    const handleRefresh = async () => {
-        try {
-            setLoadState('loading');
-            await refreshLocations();
-            await loadPlants(selectedLocation);
-        }
-        catch (e) {
-            setLoadState('error');
-        }
-    };
-    const locationOptions = locations.map(loc => ({ value: loc, label: loc }));
-    return (React.createElement("div", { className: `h-full flex flex-col ${isSmall ? 'p-3' : 'p-4'} overflow-y-auto max-w-2xl mx-auto w-full` },
-        React.createElement(PlantCard, { title: "LOCATIONS" },
-            loadState === 'loading' && (React.createElement(StatusMessage, { type: "loading", message: "Refreshing location data..." })),
-            loadState === 'error' && (React.createElement(StatusMessage, { type: "error", message: "Failed to load plants", onClose: () => setLoadState('default') })),
-            React.createElement(PlantSelect, { label: "Select Location", value: selectedLocation, onChange: setSelectedLocation, options: locationOptions }),
-            React.createElement("div", { className: "flex gap-2 mb-4" },
-                React.createElement(PlantButton, { onClick: handleRefresh, variant: "secondary", disabled: loadState === 'loading', className: "flex-1" },
-                    React.createElement("span", { className: "text-xl mr-2" }, "\uD83D\uDD04"),
-                    loadState === 'loading' ? 'Refreshing...' : 'Refresh')),
-            React.createElement("div", { className: "mb-4" },
-                React.createElement("h3", { className: "text-[#4A3020] mb-3", style: { fontFamily: "'Pixelify Sans', cursive", fontSize: '14px', fontWeight: '600' } },
-                    "Plants in ",
-                    selectedLocation,
-                    ": ",
-                    plants.length),
-                plants.length === 0 ? (React.createElement("div", { className: "text-center py-8" },
-                    React.createElement("div", { className: "text-6xl mb-4" }, "\uD83E\uDEB4"),
-                    React.createElement("p", { className: "text-[#6B4423] mb-4", style: { fontFamily: "'Pixelify Sans', cursive", fontSize: '14px' } }, "No plants in this location yet"),
-                    React.createElement(PlantButton, { onClick: () => navigate('add-plant'), variant: "primary" }, "Add First Plant"))) : (React.createElement("div", { className: "space-y-2 max-h-64 overflow-y-auto" }, plants.map((plant) => (React.createElement("div", { key: plant.uid, className: "bg-white p-3 rounded-lg border-4 border-[#8B4513] cursor-pointer hover:border-[#6B9C3D] transition-all", onClick: () => { window.__PLANTOS_SCAN_UID = plant.uid; navigate('plant-scan'); } },
-                    React.createElement("div", { className: "flex items-center justify-between" },
-                        React.createElement("div", null,
-                            React.createElement("p", { className: "text-[#4A3020]", style: { fontFamily: "'Pixelify Sans', cursive", fontSize: '14px', fontWeight: '600' } }, plant.name),
-                            React.createElement("p", { className: "text-[#6B4423]", style: { fontFamily: "'Press Start 2P', cursive", fontSize: '10px' } }, plant.uid)),
-                        React.createElement("span", { className: "text-2xl" }, "\uD83C\uDF3F")))))))),
-            React.createElement(PlantButton, { onClick: goBack, variant: "ghost" }, "Back to Home"))));
-}
-function PlantLogScreen() {
-    const { goBack } = useNavigation();
-    const { getRecentLog } = usePlantData();
-    const { isSmall } = useScreenSize();
-    const [limit, setLimit] = useState('10');
-    const [loadState, setLoadState] = useState('default');
-    const [displayedEntries, setDisplayedEntries] = useState([]);
-    const limitOptions = [{ value: '1', label: '1' }, { value: '5', label: '5' }, { value: '10', label: '10' }, { value: '25', label: '25' }, { value: '50', label: '50' }];
-    const handleLoad = async () => {
-        setLoadState('loading');
-        try {
-            const entries = await getRecentLog(parseInt(limit, 10));
-            setDisplayedEntries((entries || []).map((e) => ({ ...e, timestamp: e.ts })));
-            setLoadState('default');
-        }
-        catch (e) {
-            setLoadState('error');
-        }
-    };
-    useEffect(() => { handleLoad(); }, []);
-    const formatDate = (dateStr) => dateStr || '';
-    const getActionColor = (action) => ({ WATER: 'text-[#3498DB]', FERTILIZE: 'text-[#F39C12]', REPOT: 'text-[#8B4513]', NOTE: 'text-[#9B59B6]' }[action] || 'text-[#4A3020]');
-    const getActionIcon = (action) => ({ WATER: '💧', FERTILIZE: '🌾', REPOT: '🪴', NOTE: '📝' }[action] || '📋');
-    return (React.createElement("div", { className: `h-full flex flex-col ${isSmall ? 'p-3' : 'p-4'} overflow-y-auto max-w-2xl mx-auto w-full` },
-        React.createElement(PlantCard, { title: "PLANT LOG" },
-            loadState === 'loading' && (React.createElement(StatusMessage, { type: "loading", message: "Loading log entries..." })),
-            loadState === 'error' && (React.createElement(StatusMessage, { type: "error", message: "Failed to load log entries", onClose: () => setLoadState('default') })),
-            React.createElement("div", { className: "flex gap-2 mb-4" },
-                React.createElement("div", { className: "flex-1" },
-                    React.createElement(PlantSelect, { label: "Limit", value: limit, onChange: setLimit, options: limitOptions })),
-                React.createElement("div", { className: "flex items-end" },
-                    React.createElement(PlantButton, { onClick: handleLoad, variant: "primary", disabled: loadState === 'loading' }, loadState === 'loading' ? 'Loading...' : 'Load'))),
-            React.createElement("div", { className: "mb-4" },
-                React.createElement("h3", { className: "text-[#4A3020] mb-3", style: { fontFamily: "'Pixelify Sans', cursive", fontSize: '14px', fontWeight: '600' } },
-                    "Recent Entries: ",
-                    displayedEntries.length),
-                displayedEntries.length === 0 ? (React.createElement("div", { className: "text-center py-8" },
-                    React.createElement("div", { className: "text-6xl mb-4" }, "\uD83D\uDCCB"),
-                    React.createElement("p", { className: "text-[#6B4423]", style: { fontFamily: "'Pixelify Sans', cursive", fontSize: '14px' } }, "No log entries yet. Start caring for your plants!"))) : (React.createElement("div", { className: "space-y-2 max-h-96 overflow-y-auto" }, displayedEntries.map((entry, index) => (React.createElement("div", { key: index, className: "bg-white p-3 rounded-lg border-4 border-[#8B4513]" },
-                    React.createElement("div", { className: "flex items-start justify-between mb-2" },
-                        React.createElement("div", { className: "flex items-center gap-2" },
-                            React.createElement("span", { className: "text-2xl" }, getActionIcon(entry.action)),
-                            React.createElement("span", { className: `${getActionColor(entry.action)} font-bold`, style: { fontFamily: "'Press Start 2P', cursive", fontSize: '10px' } }, entry.action)),
-                        React.createElement("span", { className: "text-[#6B4423]", style: { fontFamily: "'Pixelify Sans', cursive", fontSize: '10px' } }, formatDate(entry.timestamp))),
-                    React.createElement("p", { className: "text-[#4A3020] mb-1", style: { fontFamily: "'Press Start 2P', cursive", fontSize: '10px' } }, entry.uid),
-                    entry.details && (React.createElement("p", { className: "text-[#6B4423]", style: { fontFamily: "'Pixelify Sans', cursive", fontSize: '12px' } }, entry.details)))))))),
-            React.createElement(PlantButton, { onClick: goBack, variant: "ghost" }, "Back to Home"))));
-}
-function PlantScanScreen() {
-    const { goBack } = useNavigation();
-    const { getPlantByUid, logPlantAction, logPlantRepot, logPlantNote } = usePlantData();
-    const { isSmall } = useScreenSize();
-    const [plantId, setPlantId] = useState(String(window.__PLANTOS_SCAN_UID || BOOT.uid || ''));
-    const [currentPlant, setCurrentPlant] = useState(null);
-    const [activeTab, setActiveTab] = useState('status');
-    const [submitState, setSubmitState] = useState('default');
-    const [uidError, setUidError] = useState('');
-    const [selectedAction, setSelectedAction] = useState('WATER');
-    const [actionDetails, setActionDetails] = useState('');
-    const [potSize, setPotSize] = useState('');
-    const [substrate, setSubstrate] = useState('');
-    const [note, setNote] = useState('');
-    const tabs = [
-        { id: 'status', label: 'Status', icon: '📊' },
-        { id: 'action', label: 'Action', icon: '⚡' },
-        { id: 'repot', label: 'Repot', icon: '🪴' },
-        { id: 'note', label: 'Note', icon: '📝' }
-    ];
-    const actionOptions = [
-        { value: 'WATER', label: '💧 Water' },
-        { value: 'FERTILIZE', label: '🌾 Fertilize' },
-        { value: 'REPOT', label: '🪴 Repot' },
-        { value: 'NOTE', label: '📝 Note' }
-    ];
-    const handleScanPlant = async () => {
-        setUidError('');
-        const uid = plantId.trim();
-        if (!uid) {
-            setUidError('Plant UID is required');
-            return;
-        }
-        try {
-            const out = await getPlantByUid(uid);
-            if (!out || !out.ok || !out.plant)
-                throw new Error('not_found');
-            setCurrentPlant(out.plant);
-            setActiveTab('status');
-            window.__PLANTOS_SCAN_UID = uid;
-        }
-        catch (e) {
-            setUidError('Plant not found');
-            setCurrentPlant(null);
-        }
-    };
-    useEffect(() => { if (plantId)
-        handleScanPlant(); }, []);
-    const withSubmit = async (fn, onDone) => {
-        if (!currentPlant)
-            return;
-        setSubmitState('loading');
-        try {
-            await fn();
-            setSubmitState('success');
-            if (onDone)
-                onDone();
-            setTimeout(() => setSubmitState('default'), 1200);
-        }
-        catch (e) {
-            setSubmitState('error');
-        }
-    };
-    const handleSubmitAction = () => withSubmit(() => logPlantAction(currentPlant.uid, selectedAction, actionDetails), () => setActionDetails(''));
-    const handleSubmitRepot = () => withSubmit(() => logPlantRepot(currentPlant.uid, potSize, substrate), () => { setPotSize(''); setSubstrate(''); });
-    const handleSubmitNote = () => withSubmit(() => logPlantNote(currentPlant.uid, note), () => setNote(''));
-    return (React.createElement("div", { className: `h-full flex flex-col ${isSmall ? 'p-3' : 'p-4'} overflow-y-auto max-w-2xl mx-auto w-full` },
-        React.createElement(PlantCard, { title: "PLANT SCAN" },
-            React.createElement("div", { className: "mb-4" },
-                React.createElement(PlantInput, { label: "Plant UID", value: plantId, onChange: setPlantId, placeholder: "Enter 8-digit UID (e.g., 12345678)", error: uidError, required: true }),
-                React.createElement(PlantButton, { onClick: handleScanPlant, variant: "primary" },
-                    React.createElement("span", { className: "text-xl mr-2" }, "\uD83D\uDD0D"),
-                    "Scan Plant")),
-            currentPlant ? (React.createElement(React.Fragment, null,
-                React.createElement("div", { className: "mb-4 p-4 bg-white rounded-lg border-4 border-[#6B9C3D]" },
-                    React.createElement("div", { className: "flex items-center justify-between mb-3" },
-                        React.createElement("span", { className: "text-4xl" }, "\uD83C\uDF3F"),
-                        React.createElement("div", { className: "text-right" },
-                            React.createElement("p", { className: "text-[#4A3020]", style: { fontFamily: "'Pixelify Sans', cursive", fontSize: '16px', fontWeight: '700' } }, currentPlant.name),
-                            React.createElement("p", { className: "text-[#6B9C3D]", style: { fontFamily: "'Press Start 2P', cursive", fontSize: '10px' } }, currentPlant.uid))),
-                    React.createElement("div", { className: "text-[#6B4423] flex items-center gap-2", style: { fontFamily: "'Pixelify Sans', cursive", fontSize: '12px' } },
-                        React.createElement("span", null, "\uD83D\uDCCD"),
-                        React.createElement("span", null, currentPlant.location))),
-                React.createElement(TabBar, { tabs: tabs, activeTab: activeTab, onTabChange: setActiveTab }),
-                submitState === 'loading' && (React.createElement(StatusMessage, { type: "loading", message: "Submitting..." })),
-                submitState === 'success' && (React.createElement(StatusMessage, { type: "success", message: "Action recorded successfully!" })),
-                submitState === 'error' && (React.createElement(StatusMessage, { type: "error", message: "Failed to record action", onClose: () => setSubmitState('default') })),
-                activeTab === 'status' && (React.createElement("div", { className: "space-y-3" },
-                    React.createElement("div", { className: "bg-white p-4 rounded-lg border-4 border-[#8B4513]" },
-                        React.createElement("p", { className: "text-[#4A3020] mb-2", style: { fontFamily: "'Pixelify Sans', cursive", fontSize: '14px', fontWeight: '600' } }, "Plant Health Status"),
-                        React.createElement("div", { className: "space-y-2" },
-                            React.createElement("div", { className: "flex justify-between" },
-                                React.createElement("span", { style: { fontFamily: "'Pixelify Sans', cursive", fontSize: '12px' } }, "\uD83D\uDCA7 Water Level:"),
-                                React.createElement("span", { className: "text-[#3498DB]", style: { fontFamily: "'Pixelify Sans', cursive", fontSize: '12px', fontWeight: '600' } }, "Good")),
-                            React.createElement("div", { className: "flex justify-between" },
-                                React.createElement("span", { style: { fontFamily: "'Pixelify Sans', cursive", fontSize: '12px' } }, "\u2600\uFE0F Light:"),
-                                React.createElement("span", { className: "text-[#F39C12]", style: { fontFamily: "'Pixelify Sans', cursive", fontSize: '12px', fontWeight: '600' } }, "Optimal")),
-                            React.createElement("div", { className: "flex justify-between" },
-                                React.createElement("span", { style: { fontFamily: "'Pixelify Sans', cursive", fontSize: '12px' } }, "\uD83D\uDC9A Overall:"),
-                                React.createElement("span", { className: "text-[#6B9C3D]", style: { fontFamily: "'Pixelify Sans', cursive", fontSize: '12px', fontWeight: '600' } }, "Healthy")))))),
-                activeTab === 'action' && (React.createElement("div", { className: "space-y-3" },
-                    React.createElement(PlantSelect, { label: "Select Action", value: selectedAction, onChange: setSelectedAction, options: actionOptions }),
-                    React.createElement(PlantInput, { label: "Details (optional)", value: actionDetails, onChange: setActionDetails, type: "textarea", placeholder: "Add any notes about this action..." }),
-                    React.createElement(PlantButton, { onClick: handleSubmitAction, variant: "primary", disabled: submitState === 'loading' }, submitState === 'loading' ? 'Submitting...' : 'Submit Action'))),
-                activeTab === 'repot' && (React.createElement("div", { className: "space-y-3" },
-                    React.createElement("div", { className: "bg-[#F4E4C1] p-4 rounded-lg border-4 border-[#8B4513] mb-3" },
-                        React.createElement("p", { className: "text-[#4A3020] mb-2", style: { fontFamily: "'Pixelify Sans', cursive", fontSize: '12px', fontWeight: '600' } }, "\uD83E\uDEB4 Quick Repot")),
-                    React.createElement(PlantInput, { label: "Pot Size", value: potSize, onChange: setPotSize, placeholder: "e.g., 6 inch", required: true }),
-                    React.createElement(PlantInput, { label: "Substrate", value: substrate, onChange: setSubstrate, placeholder: "e.g., Cactus mix", required: true }),
-                    React.createElement(PlantButton, { onClick: handleSubmitRepot, variant: "primary", disabled: submitState === 'loading' || !potSize || !substrate }, submitState === 'loading' ? 'Submitting...' : 'Submit Repot'))),
-                activeTab === 'note' && (React.createElement("div", { className: "space-y-3" },
-                    React.createElement(PlantInput, { label: "Note", value: note, onChange: setNote, type: "textarea", placeholder: "Add observations, reminders, or any notes about this plant...", required: true }),
-                    React.createElement(PlantButton, { onClick: handleSubmitNote, variant: "primary", disabled: submitState === 'loading' || !note }, submitState === 'loading' ? 'Submitting...' : 'Save Note'))))) : (React.createElement("div", { className: "text-center py-8" },
-                React.createElement("div", { className: "text-6xl mb-4" }, "\uD83D\uDD0D"),
-                React.createElement("p", { className: "text-[#6B4423]", style: { fontFamily: "'Pixelify Sans', cursive", fontSize: '14px' } }, "Enter a Plant UID to begin"))),
-            React.createElement("div", { className: "mt-4" },
-                React.createElement(PlantButton, { onClick: goBack, variant: "ghost" }, "Back to Home")))));
-}
-function SpecScreen() {
-    const { goBack } = useNavigation();
-    const { isSmall } = useScreenSize();
-    return (React.createElement("div", { className: `h-full flex flex-col ${isSmall ? 'p-3' : 'p-4'} overflow-y-auto max-w-3xl mx-auto w-full` },
-        React.createElement(PlantCard, { title: "PlantOS SPEC" },
-            React.createElement("div", { className: "space-y-4 text-[#4A3020]", style: { fontFamily: "'Pixelify Sans', cursive", fontSize: isSmall ? '11px' : '12px' } },
-                React.createElement("section", null,
-                    React.createElement("h3", { className: "font-bold mb-2", style: { fontSize: '14px' } }, "\uD83D\uDCCD Screen Map"),
-                    React.createElement("div", { className: "bg-white p-3 rounded border-4 border-[#8B4513]" },
-                        React.createElement("pre", { className: "whitespace-pre-wrap", style: { fontSize: '10px' } }, `Splash → Home
-  ├─ Add Plant
-  ├─ Locations
-  ├─ Plant Log
-  ├─ Plant Scan
-  │   ├─ Status Tab
-  │   ├─ Action Tab
-  │   ├─ Repot Tab
-  │   └─ Note Tab
-  └─ Spec (this page)`))),
-                React.createElement("section", null,
-                    React.createElement("h3", { className: "font-bold mb-2", style: { fontSize: '14px' } }, "\uD83D\uDD04 User Flow"),
-                    React.createElement("div", { className: "bg-white p-3 rounded border-4 border-[#8B4513] space-y-2" },
-                        React.createElement("p", null,
-                            React.createElement("strong", null, "1. Onboarding:"),
-                            " Splash \u2192 Home"),
-                        React.createElement("p", null,
-                            React.createElement("strong", null, "2. Add Plant:"),
-                            " Home \u2192 Add Plant \u2192 [Create] \u2192 Success w/ UID \u2192 Open Scan"),
-                        React.createElement("p", null,
-                            React.createElement("strong", null, "3. View Plants:"),
-                            " Home \u2192 Locations \u2192 [Select Location] \u2192 Plant List"),
-                        React.createElement("p", null,
-                            React.createElement("strong", null, "4. Log Action:"),
-                            " Home \u2192 Scan \u2192 [Enter UID] \u2192 [Select Tab] \u2192 Submit"),
-                        React.createElement("p", null,
-                            React.createElement("strong", null, "5. View History:"),
-                            " Home \u2192 Plant Log \u2192 [Set Limit] \u2192 Load"))),
-                React.createElement("section", null,
-                    React.createElement("h3", { className: "font-bold mb-2", style: { fontSize: '14px' } }, "\uD83C\uDFA8 Component Library"),
-                    React.createElement("div", { className: "bg-white p-3 rounded border-4 border-[#8B4513] space-y-1" },
-                        React.createElement("p", null,
-                            React.createElement("strong", null, "PlantButton:"),
-                            " primary, secondary, ghost variants"),
-                        React.createElement("p", null,
-                            React.createElement("strong", null, "PlantInput:"),
-                            " text, textarea types with validation"),
-                        React.createElement("p", null,
-                            React.createElement("strong", null, "PlantSelect:"),
-                            " dropdown with custom styling"),
-                        React.createElement("p", null,
-                            React.createElement("strong", null, "PlantCard:"),
-                            " container with title and border"),
-                        React.createElement("p", null,
-                            React.createElement("strong", null, "StatusMessage:"),
-                            " success, error, info, loading states"),
-                        React.createElement("p", null,
-                            React.createElement("strong", null, "TabBar:"),
-                            " multi-tab navigation with icons"))),
-                React.createElement("section", null,
-                    React.createElement("h3", { className: "font-bold mb-2", style: { fontSize: '14px' } }, "\uD83C\uDFA8 Color Palette"),
-                    React.createElement("div", { className: "bg-white p-3 rounded border-4 border-[#8B4513] space-y-1" },
-                        React.createElement("div", { className: "flex items-center gap-2" },
-                            React.createElement("div", { className: "w-6 h-6 bg-[#6B9C3D] border-2 border-black" }),
-                            React.createElement("span", null, "Primary Green: #6B9C3D")),
-                        React.createElement("div", { className: "flex items-center gap-2" },
-                            React.createElement("div", { className: "w-6 h-6 bg-[#8B4513] border-2 border-black" }),
-                            React.createElement("span", null, "Brown: #8B4513")),
-                        React.createElement("div", { className: "flex items-center gap-2" },
-                            React.createElement("div", { className: "w-6 h-6 bg-[#F4E4C1] border-2 border-black" }),
-                            React.createElement("span", null, "Cream: #F4E4C1")),
-                        React.createElement("div", { className: "flex items-center gap-2" },
-                            React.createElement("div", { className: "w-6 h-6 bg-[#3498DB] border-2 border-black" }),
-                            React.createElement("span", null, "Blue: #3498DB")),
-                        React.createElement("div", { className: "flex items-center gap-2" },
-                            React.createElement("div", { className: "w-6 h-6 bg-[#E74C3C] border-2 border-black" }),
-                            React.createElement("span", null, "Red: #E74C3C"))))),
-            React.createElement("div", { className: "mt-6" },
-                React.createElement(PlantButton, { onClick: goBack, variant: "ghost" }, "Back to Home")))));
-}
-// ============ MAIN APP ============
-function AppContent() {
-    const { currentScreen } = useNavigation();
-    const renderScreen = () => {
-        switch (currentScreen) {
-            case 'splash':
-                return React.createElement(SplashScreen, null);
-            case 'home':
-                return React.createElement(HomeScreen, null);
-            case 'add-plant':
-                return React.createElement(AddPlantScreen, null);
-            case 'locations':
-                return React.createElement(LocationsScreen, null);
-            case 'plant-log':
-                return React.createElement(PlantLogScreen, null);
-            case 'plant-scan':
-                return React.createElement(PlantScanScreen, null);
-            case 'spec':
-                return React.createElement(SpecScreen, null);
-            default:
-                return React.createElement(HomeScreen, null);
-        }
-    };
-    return (React.createElement("div", { className: "flex flex-col h-full relative overflow-hidden" },
-        React.createElement("div", { className: "absolute inset-0 bg-[#8BC34A]" },
-            React.createElement("div", { className: "absolute inset-0 opacity-20", style: {
-                    backgroundImage: `repeating-linear-gradient(
-                                0deg,
-                                transparent,
-                                transparent 2px,
-                                rgba(0,0,0,0.1) 2px,
-                                rgba(0,0,0,0.1) 4px
-                            ),
-                            repeating-linear-gradient(
-                                90deg,
-                                transparent,
-                                transparent 2px,
-                                rgba(0,0,0,0.1) 2px,
-                                rgba(0,0,0,0.1) 4px
-                            )`
-                } }),
-            React.createElement("div", { className: "absolute bottom-20 left-[10%] text-4xl" }, "\uD83C\uDF3B"),
-            React.createElement("div", { className: "absolute bottom-32 left-[25%] text-3xl" }, "\uD83C\uDF37"),
-            React.createElement("div", { className: "absolute bottom-24 right-[15%] text-4xl" }, "\uD83C\uDF3A"),
-            React.createElement("div", { className: "absolute bottom-40 right-[30%] text-3xl" }, "\uD83C\uDF3C"),
-            React.createElement("div", { className: "absolute top-20 left-[20%] text-2xl" }, "\uD83E\uDD8B"),
-            React.createElement("div", { className: "absolute top-32 right-[25%] text-2xl" }, "\uD83D\uDC1D"),
-            React.createElement("div", { className: "absolute top-8 right-8 w-16 h-16 bg-[#FFD700] rounded-full border-4 border-[#FFA500] shadow-lg" })),
-        React.createElement("div", { className: "flex-1 flex items-center justify-center relative z-10 overflow-auto py-8" }, renderScreen())));
-}
-function PlantOSApp() {
-    return (React.createElement(NavigationProvider, null,
-        React.createElement(PlantDataProvider, null,
-            React.createElement(AppContent, null))));
-}
-// ============ RENDER ============
-const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(React.createElement(PlantOSApp, null));
 
-    </script>
+function gasCall(fn, ...args) {
+  return new Promise((resolve, reject) => {
+    if (!(window.google && google.script && google.script.run && typeof google.script.run[fn] === "function")) {
+      reject(new Error("Apps Script runtime unavailable"));
+      return;
+    }
+    google.script.run
+      .withSuccessHandler(resolve)
+      .withFailureHandler((err) => reject(new Error((err && err.message) || String(err))))[fn](...args);
+  });
+}
+
+function useScreenSize() {
+  const [screenSize, setScreenSize] = useState(() => {
+    const w = window.innerWidth, h = window.innerHeight;
+    return { w, h, isSmall: w < 640 };
+  });
+  useEffect(() => {
+    const on = () => setScreenSize({ w: window.innerWidth, h: window.innerHeight, isSmall: window.innerWidth < 640 });
+    window.addEventListener('resize', on);
+    window.addEventListener('orientationchange', on);
+    return () => { window.removeEventListener('resize', on); window.removeEventListener('orientationchange', on); };
+  }, []);
+  return screenSize;
+}
+
+function format12h(date) {
+  return date.toLocaleString('en-US', {
+    weekday:'short', month:'short', day:'numeric',
+    hour:'numeric', minute:'2-digit', second:'2-digit',
+    hour12:true
+  });
+}
+
+/* ===================== NAV ===================== */
+const NavigationContext = createContext(undefined);
+
+function NavigationProvider({ children }) {
+  const start = (() => {
+    const openAdd = String(BOOT.openAdd || '').trim().toLowerCase();
+    if (openAdd === 'basic' || openAdd === '1') return 'add-basic';
+    if (openAdd === 'advanced') return 'add-advanced';
+    if (BOOT.uid) return 'plant';
+    const modeMap = { home:'home', locations:'locations', log:'plant-log', spec:'spec', plant:'plant', watering:'watering', quicklog:'quick-log' };
+    return modeMap[String(BOOT.mode||'home')] || 'home';
+  })();
+
+  const [currentScreen, setCurrentScreen] = useState(start);
+  const [history, setHistory] = useState([start]);
+
+  const navigate = (screen) => { setCurrentScreen(screen); setHistory(prev => [...prev, screen]); };
+  const goBack = () => {
+    if (history.length > 1) {
+      const h = [...history]; h.pop();
+      setHistory(h);
+      setCurrentScreen(h[h.length - 1]);
+    }
+  };
+
+  return (
+    <NavigationContext.Provider value={{ currentScreen, navigate, goBack }}>
+      {children}
+    </NavigationContext.Provider>
+  );
+}
+
+function useNavigation() {
+  const ctx = useContext(NavigationContext);
+  if (!ctx) throw new Error('useNavigation must be used within NavigationProvider');
+  return ctx;
+}
+
+/* ===================== DATA ===================== */
+const PlantDataContext = createContext(undefined);
+
+function PlantDataProvider({ children }) {
+  const [locations, setLocations] = useState([]);
+  const [homeData, setHomeData] = useState(null);
+
+  useEffect(() => {
+    gasCall('plantosListLocations').then(setLocations).catch(() => setLocations([]));
+    gasCall('plantosHome').then(setHomeData).catch(() => setHomeData(null));
+  }, []);
+
+  const refreshHome = async () => {
+    const d = await gasCall('plantosHome');
+    setHomeData(d);
+    return d;
+  };
+
+  const getPlantsByLocation = (location) => gasCall('plantosGetPlantsByLocation', location);
+  const getPlant = (uid) => gasCall('plantosGetPlant', uid).then(res => (res && res.ok ? res.plant : null));
+  const setNickname = (uid, nickname) => gasCall('plantosSetNickname', uid, nickname);
+
+  const createPlant = (payload) => gasCall('plantosCreatePlant', payload);
+  const updatePlant = (uid, patch) => gasCall('plantosUpdatePlant', uid, patch || {});
+  const quickLog = (uid, payload) => gasCall('plantosQuickLog', uid, payload || {});
+  const batchWater = (uids) => gasCall('plantosBatchWater', uids || []);
+
+  const getRecentLog = (limit) => gasCall('plantosGetRecentLog', limit || 25);
+  const getTimeline = (uid, limit) => gasCall('plantosGetTimeline', uid, limit || 30);
+  const search = (q, limit) => gasCall('plantosSearch', q, limit || 15);
+
+  return (
+    <PlantDataContext.Provider value={{
+      locations, homeData, refreshHome,
+      getPlantsByLocation, getPlant, getTimeline, getRecentLog,
+      createPlant, updatePlant, setNickname,
+      quickLog, batchWater, search
+    }}>
+      {children}
+    </PlantDataContext.Provider>
+  );
+}
+
+function usePlantData() {
+  const ctx = useContext(PlantDataContext);
+  if (!ctx) throw new Error('usePlantData must be used within PlantDataProvider');
+  return ctx;
+}
+
+/* ===================== UI COMPONENTS ===================== */
+function PlantButton({ children, variant='primary', onClick, disabled=false, className='' }) {
+  const base = "px-4 py-3 rounded-lg border-4 transition-all duration-150 font-semibold";
+  const styles = {
+    primary: "bg-[#8BB55C] border-[#6B9C3D] text-[#2A4A1A] shadow hover:scale-105",
+    secondary: "bg-[#7BB5CC] border-[#5A8C9D] text-[#1A3A4A] shadow hover:scale-105",
+    ghost: "bg-transparent border-[#C8B488] text-[#4A3020] hover:bg-[#E8D4A8]"
+  };
+  const dis = "opacity-50 cursor-not-allowed hover:scale-100";
+  return (
+    <button onClick={onClick} disabled={disabled}
+      className={`${base} ${styles[variant]} ${disabled ? dis : 'cursor-pointer'} ${className}`}
+      style={{ fontFamily: "'Pixelify Sans', cursive" }}>
+      {children}
+    </button>
+  );
+}
+
+function PlantCard({ children, title, className='' }) {
+  return (
+    <div className={`bg-gradient-to-b from-[#F4E4C1] to-[#E8D4A8] rounded-xl border-8 border-[#6B4423] shadow-lg p-4 ${className}`}>
+      {title && (
+        <h3 className="text-[#4A3020] mb-3 pb-2 border-b-4 border-[#C8B488]"
+          style={{ fontFamily: "'Press Start 2P', cursive", fontSize: '14px' }}>
+          {title}
+        </h3>
+      )}
+      {children}
+    </div>
+  );
+}
+
+function StatusMessage({ type, message }) {
+  const colors = {
+    success: 'bg-[#6B9C3D] border-[#5A8C2D] text-white',
+    error: 'bg-[#E74C3C] border-[#C0392B] text-white',
+    info: 'bg-[#3498DB] border-[#2980B9] text-white',
+    loading: 'bg-[#F39C12] border-[#E67E22] text-white'
+  };
+  const icons = { success:'✓', error:'✗', info:'ℹ', loading:'⏳' };
+  return (
+    <div className={`${colors[type]} border-4 rounded-lg px-4 py-3 mb-4 flex items-center gap-3 shadow-lg`}>
+      <span className="text-2xl">{icons[type]}</span>
+      <span style={{ fontFamily: "'Pixelify Sans', cursive", fontSize:'14px', fontWeight:'600' }}>{message}</span>
+    </div>
+  );
+}
+
+function Field({ label, value, onChange, placeholder='', type='text' }) {
+  return (
+    <div className="mb-3">
+      <div className="mb-1 text-[#4A3020]" style={{ fontFamily:"'Pixelify Sans', cursive", fontWeight:800 }}>
+        {label}
+      </div>
+      {type === 'textarea' ? (
+        <textarea className="w-full px-3 py-2 bg-white border-4 border-[#8B4513] rounded-lg"
+          style={{ fontFamily:"'Pixelify Sans', cursive" }}
+          rows={3} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} />
+      ) : (
+        <input className="w-full px-3 py-2 bg-white border-4 border-[#8B4513] rounded-lg"
+          style={{ fontFamily:"'Pixelify Sans', cursive" }}
+          value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} />
+      )}
+    </div>
+  );
+}
+
+/* ===================== SCREENS ===================== */
+
+function HomeScreen() {
+  const { navigate } = useNavigation();
+  const { homeData, refreshHome } = usePlantData();
+  const { isSmall } = useScreenSize();
+
+  useEffect(() => { refreshHome().catch(()=>{}); }, []);
+
+  const dueNow = (homeData && homeData.dueNow) ? homeData.dueNow : [];
+  const upcoming = (homeData && homeData.upcoming) ? homeData.upcoming : [];
+  const birthdays = (homeData && homeData.birthdays) ? homeData.birthdays : [];
+
+  return (
+    <div className={`h-full flex flex-col ${isSmall ? 'p-3' : 'p-4'} max-w-2xl mx-auto w-full`}>
+      <PlantCard className="mb-4">
+        <div className="text-center">
+          <h2 className="text-[#4A3020] mb-2"
+            style={{ fontFamily: "'Press Start 2P', cursive", fontSize: isSmall ? '14px' : '16px' }}>
+            PlantOS
+          </h2>
+
+          {birthdays.length > 0 && (
+            <div className="mt-2 bg-[#fff3cd] border-2 border-[#ffc107] rounded-lg px-3 py-2"
+              style={{ fontFamily: "'Pixelify Sans', cursive", fontSize: '12px' }}>
+              🎂 Todays birthdays: {birthdays.join(', ')}
+            </div>
+          )}
+
+          {dueNow.length > 0 && (
+            <div className="mt-3 bg-[#fde8e7] border-2 border-[#e74c3c] rounded-lg px-3 py-2 text-left">
+              <p style={{ fontFamily: "'Pixelify Sans', cursive", fontSize: '12px', fontWeight: 900, color:'#c0392b' }}>
+                💧 Needs watering now:
+              </p>
+              {dueNow.slice(0, 6).map(p => (
+                <div key={p.uid} className="flex justify-between"
+                  style={{ fontFamily: "'Pixelify Sans', cursive", fontSize:'11px', color:'#4A3020' }}>
+                  <span>{p.primary}</span>
+                  <span className="text-[#e74c3c]">{p.due}</span>
+                </div>
+              ))}
+              {dueNow.length > 6 && (
+                <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'11px', color:'#6B4423' }}>
+                  +{dueNow.length - 6} more
+                </div>
+              )}
+            </div>
+          )}
+
+          {dueNow.length === 0 && upcoming.length > 0 && (
+            <div className="mt-3 bg-[#eef9ef] border-2 border-[#6B9C3D] rounded-lg px-3 py-2 text-left">
+              <p style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', fontWeight:900, color:'#2A4A1A' }}>
+                ✅ Nothing due right now. Next up:
+              </p>
+              {upcoming.slice(0, 4).map(p => (
+                <div key={p.uid} className="flex justify-between"
+                  style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'11px', color:'#4A3020' }}>
+                  <span>{p.primary}</span>
+                  <span className="text-[#2A4A1A]">{p.due}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </PlantCard>
+
+      <PlantCard title="MAIN MENU" className="flex-1">
+        <div className="space-y-3">
+          <PlantButton onClick={() => navigate('watering')}>💧 Watering Dashboard</PlantButton>
+          <PlantButton onClick={() => navigate('quick-log')}>⚡ Quick Log</PlantButton>
+
+          <div className="grid grid-cols-2 gap-2">
+            <PlantButton onClick={() => navigate('add-basic')}>🌱 Add (Basic)</PlantButton>
+            <PlantButton onClick={() => navigate('add-advanced')} variant="secondary">🧬 Add (Advanced)</PlantButton>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <PlantButton onClick={() => navigate('locations')}>📍 Locations</PlantButton>
+            <PlantButton onClick={() => navigate('plant-log')} variant="secondary">📋 Plant Log</PlantButton>
+          </div>
+
+          <PlantButton onClick={() => navigate('spec')} variant="ghost">📖 Spec</PlantButton>
+        </div>
+      </PlantCard>
+    </div>
+  );
+}
+
+function AddBasicScreen() {
+  const { goBack, navigate } = useNavigation();
+  const { locations, createPlant, refreshHome } = usePlantData();
+  const { isSmall } = useScreenSize();
+
+  const [nickname, setNickname] = useState('');
+  const [classification, setClassification] = useState('');
+  const [genus, setGenus] = useState('');
+  const [species, setSpecies] = useState('');
+  const [location, setLocation] = useState(BOOT.loc || (locations[0] || 'Unsorted'));
+  const [potSize, setPotSize] = useState('');
+  const [substrate, setSubstrate] = useState('');
+  const [reminderEnabled, setReminderEnabled] = useState(true);
+  const [everyDays, setEveryDays] = useState('7');
+
+  const [state, setState] = useState('default');
+  const [created, setCreated] = useState('');
+
+  async function submit() {
+    if (!location.trim()) return;
+    setState('loading');
+    try {
+      const res = await createPlant({
+        nickname, classification, genus, species, location,
+        potSize, substrate,
+        reminderEnabled,
+        everyDays: Number(everyDays || 0)
+      });
+      if (res && res.ok) {
+        setCreated(res.uid);
+        await refreshHome();
+        setState('success');
+      } else {
+        setState('error');
+      }
+    } catch {
+      setState('error');
+    }
+  }
+
+  return (
+    <div className={`h-full flex flex-col ${isSmall ? 'p-3' : 'p-4'} overflow-y-auto max-w-2xl mx-auto w-full`}>
+      <PlantCard title="ADD SPECIMEN (BASIC)">
+        {state === 'loading' && <StatusMessage type="loading" message="Creating..." />}
+        {state === 'error' && <StatusMessage type="error" message="Failed to create" />}
+        {state === 'success' && (
+          <>
+            <StatusMessage type="success" message="Created ✅" />
+            <div className="bg-white p-3 rounded-lg border-4 border-[#6B9C3D] mb-3">
+              <div style={{ fontFamily:"'Press Start 2P', cursive", fontSize:'12px', color:'#4A3020' }}>
+                UID {created}
+              </div>
+            </div>
+            <PlantButton onClick={() => navigate('home')}>Back Home</PlantButton>
+          </>
+        )}
+
+        {state !== 'success' && (
+          <>
+            <Field label="Nick-name (what you want to see)" value={nickname} onChange={setNickname} placeholder="e.g., Wendy Williams" />
+            <Field label="Classification" value={classification} onChange={setClassification} placeholder="e.g., Cactaceae" />
+            <Field label="Genus" value={genus} onChange={setGenus} placeholder="e.g., Lophophora" />
+            <Field label="Species" value={species} onChange={setSpecies} placeholder="e.g., williamsii" />
+
+            <Field label="Location" value={location} onChange={setLocation} placeholder="e.g., Living Room" />
+            <Field label="Pot Size" value={potSize} onChange={setPotSize} placeholder="e.g., 4 inch" />
+            <Field label="Substrate" value={substrate} onChange={setSubstrate} placeholder="e.g., pumice + lava + sand" />
+
+            <div className="mb-3 bg-white p-3 rounded-lg border-4 border-[#8B4513]">
+              <div className="flex items-center justify-between">
+                <div style={{ fontFamily:"'Pixelify Sans', cursive", fontWeight:900, color:'#4A3020' }}>
+                  Water Reminder
+                </div>
+                <input type="checkbox" checked={reminderEnabled} onChange={e => setReminderEnabled(e.target.checked)} />
+              </div>
+              <div className="mt-2">
+                <Field label="Water how often? (days)" value={everyDays} onChange={setEveryDays} placeholder="e.g., 7" />
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <PlantButton onClick={submit}>Save</PlantButton>
+              <PlantButton variant="ghost" onClick={goBack}>Back</PlantButton>
+            </div>
+          </>
+        )}
+      </PlantCard>
+    </div>
+  );
+}
+
+function AddAdvancedScreen() {
+  const { goBack, navigate } = useNavigation();
+  const { createPlant, refreshHome } = usePlantData();
+  const { isSmall } = useScreenSize();
+
+  const [displayName, setDisplayName] = useState('');
+  const [nickname, setNickname] = useState('');
+  const [plantId, setPlantId] = useState('');
+  const [name, setName] = useState('');
+
+  const [classification, setClassification] = useState('');
+  const [genus, setGenus] = useState('');
+  const [species, setSpecies] = useState('');
+
+  const [location, setLocation] = useState('Unsorted');
+  const [potSize, setPotSize] = useState('');
+  const [substrate, setSubstrate] = useState('');
+  const [medium, setMedium] = useState('');
+  const [birthday, setBirthday] = useState('');
+  const [notes, setNotes] = useState('');
+
+  const [reminderEnabled, setReminderEnabled] = useState(true);
+  const [everyDays, setEveryDays] = useState('7');
+
+  const [state, setState] = useState('default');
+  const [created, setCreated] = useState('');
+
+  async function submit() {
+    setState('loading');
+    try {
+      const res = await createPlant({
+        displayName, nickname, plantId, name,
+        classification, genus, species,
+        location, potSize, substrate, medium,
+        birthday, notes,
+        reminderEnabled, everyDays: Number(everyDays || 0)
+      });
+      if (res && res.ok) {
+        setCreated(res.uid);
+        await refreshHome();
+        setState('success');
+      } else setState('error');
+    } catch {
+      setState('error');
+    }
+  }
+
+  return (
+    <div className={`h-full flex flex-col ${isSmall ? 'p-3' : 'p-4'} overflow-y-auto max-w-2xl mx-auto w-full`}>
+      <PlantCard title="ADD SPECIMEN (ADVANCED)">
+        {state === 'loading' && <StatusMessage type="loading" message="Creating..." />}
+        {state === 'error' && <StatusMessage type="error" message="Failed to create" />}
+        {state === 'success' && (
+          <>
+            <StatusMessage type="success" message="Created ✅" />
+            <div className="bg-white p-3 rounded-lg border-4 border-[#6B9C3D] mb-3">
+              <div style={{ fontFamily:"'Press Start 2P', cursive", fontSize:'12px', color:'#4A3020' }}>
+                UID {created}
+              </div>
+            </div>
+            <PlantButton onClick={() => navigate('home')}>Back Home</PlantButton>
+          </>
+        )}
+
+        {state !== 'success' && (
+          <>
+            <Field label="Nick-name" value={nickname} onChange={setNickname} />
+            <Field label="Display Name" value={displayName} onChange={setDisplayName} />
+            <Field label="Plant ID (optional, human)" value={plantId} onChange={setPlantId} />
+            <Field label="Name (optional)" value={name} onChange={setName} />
+
+            <Field label="Classification" value={classification} onChange={setClassification} />
+            <Field label="Genus" value={genus} onChange={setGenus} />
+            <Field label="Species" value={species} onChange={setSpecies} />
+
+            <Field label="Location" value={location} onChange={setLocation} />
+            <Field label="Pot Size" value={potSize} onChange={setPotSize} />
+            <Field label="Substrate" value={substrate} onChange={setSubstrate} />
+            <Field label="Medium" value={medium} onChange={setMedium} />
+            <Field label="Birthday (yyyy-mm-dd)" value={birthday} onChange={setBirthday} />
+            <Field label="Notes" value={notes} onChange={setNotes} type="textarea" />
+
+            <div className="mb-3 bg-white p-3 rounded-lg border-4 border-[#8B4513]">
+              <div className="flex items-center justify-between">
+                <div style={{ fontFamily:"'Pixelify Sans', cursive", fontWeight:900, color:'#4A3020' }}>
+                  Water Reminder
+                </div>
+                <input type="checkbox" checked={reminderEnabled} onChange={e => setReminderEnabled(e.target.checked)} />
+              </div>
+              <div className="mt-2">
+                <Field label="Water how often? (days)" value={everyDays} onChange={setEveryDays} placeholder="e.g., 7" />
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <PlantButton onClick={submit}>Save</PlantButton>
+              <PlantButton variant="ghost" onClick={goBack}>Back</PlantButton>
+            </div>
+          </>
+        )}
+      </PlantCard>
+    </div>
+  );
+}
+
+function WateringScreen() {
+  const { goBack, navigate } = useNavigation();
+  const { homeData, refreshHome, batchWater } = usePlantData();
+  const { isSmall } = useScreenSize();
+  const [msg, setMsg] = useState(null);
+
+  useEffect(() => { refreshHome().catch(()=>{}); }, []);
+
+  const dueNow = (homeData && homeData.dueNow) ? homeData.dueNow : [];
+  const upcoming = (homeData && homeData.upcoming) ? homeData.upcoming : [];
+
+  async function waterAll() {
+    const uids = dueNow.map(x => x.uid);
+    if (!uids.length) return;
+    setMsg({ type:'loading', text:'Batch watering...' });
+    try {
+      await batchWater(uids);
+      await refreshHome();
+      setMsg({ type:'success', text:'Done ✅' });
+    } catch {
+      setMsg({ type:'error', text:'Failed' });
+    }
+    setTimeout(()=> setMsg(null), 1500);
+  }
+
+  return (
+    <div className={`h-full flex flex-col ${isSmall ? 'p-3' : 'p-4'} overflow-y-auto max-w-2xl mx-auto w-full`}>
+      <PlantCard title="WATERING DASHBOARD">
+        {msg && <StatusMessage type={msg.type} message={msg.text} />}
+
+        <div className="mb-3 bg-white p-3 rounded-lg border-4 border-[#e74c3c]">
+          <div style={{ fontFamily:"'Pixelify Sans', cursive", fontWeight:900, color:'#c0392b' }}>
+            Due Now: {dueNow.length}
+          </div>
+          <div className="mt-2 space-y-2">
+            {dueNow.map(p => (
+              <button key={p.uid}
+                onClick={() => { window.location.href = `${BOOT.baseUrl}?mode=plant&uid=${encodeURIComponent(p.uid)}`; }}
+                className="w-full text-left bg-[#fff] p-3 rounded-lg border-4 border-[#8B4513] hover:border-[#6B9C3D] transition-all">
+                <div className="flex justify-between">
+                  <div>
+                    <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'14px', fontWeight:900, color:'#4A3020' }}>
+                      {p.primary}
+                    </div>
+                    <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', color:'#6B4423' }}>
+                      {p.secondary || ''}
+                    </div>
+                  </div>
+                  <div style={{ fontFamily:"'Press Start 2P', cursive", fontSize:'10px', color:'#e74c3c' }}>
+                    {p.due}
+                  </div>
+                </div>
+              </button>
+            ))}
+            {dueNow.length === 0 && (
+              <div style={{ fontFamily:"'Pixelify Sans', cursive", color:'#4A3020' }}>Nothing due right now 🎉</div>
+            )}
+          </div>
+
+          <div className="mt-3">
+            <PlantButton onClick={waterAll} disabled={!dueNow.length}>💧 Water All Due</PlantButton>
+          </div>
+        </div>
+
+        <div className="mb-3 bg-white p-3 rounded-lg border-4 border-[#6B9C3D]">
+          <div style={{ fontFamily:"'Pixelify Sans', cursive", fontWeight:900, color:'#2A4A1A' }}>
+            Upcoming (7 days): {upcoming.length}
+          </div>
+          <div className="mt-2 space-y-2">
+            {upcoming.map(p => (
+              <div key={p.uid} className="bg-[#fff] p-2 rounded-lg border-2 border-[#C8B488]">
+                <div className="flex justify-between">
+                  <div style={{ fontFamily:"'Pixelify Sans', cursive", fontWeight:900, color:'#4A3020' }}>{p.primary}</div>
+                  <div style={{ fontFamily:"'Pixelify Sans', cursive", color:'#4A3020' }}>{p.due}</div>
+                </div>
+              </div>
+            ))}
+            {upcoming.length === 0 && (
+              <div style={{ fontFamily:"'Pixelify Sans', cursive", color:'#4A3020' }}>No upcoming reminders.</div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex gap-2">
+          <PlantButton variant="ghost" onClick={goBack}>Back</PlantButton>
+          <PlantButton variant="secondary" onClick={() => navigate('home')}>Home</PlantButton>
+        </div>
+      </PlantCard>
+    </div>
+  );
+}
+
+function QuickLogScreen() {
+  const { goBack } = useNavigation();
+  const { search, quickLog, refreshHome } = usePlantData();
+  const { isSmall } = useScreenSize();
+
+  const [q, setQ] = useState('');
+  const [hits, setHits] = useState([]);
+  const [picked, setPicked] = useState(null);
+
+  const [water, setWater] = useState(true);
+  const [fertilize, setFertilize] = useState(false);
+  const [repot, setRepot] = useState(false);
+  const [potSize, setPotSize] = useState('');
+  const [substrate, setSubstrate] = useState('');
+  const [medium, setMedium] = useState('');
+  const [notes, setNotes] = useState('');
+
+  const [msg, setMsg] = useState(null);
+
+  async function doSearch() {
+    if (!q.trim()) { setHits([]); return; }
+    const res = await search(q, 20);
+    setHits(res || []);
+  }
+
+  async function submit() {
+    if (!picked) return;
+    setMsg({ type:'loading', text:'Saving...' });
+    try {
+      await quickLog(picked.uid, { water, fertilize, repot, potSize, substrate, medium, notes });
+      await refreshHome();
+      setMsg({ type:'success', text:'Saved ✅' });
+      setNotes('');
+    } catch {
+      setMsg({ type:'error', text:'Failed' });
+    }
+    setTimeout(()=> setMsg(null), 1500);
+  }
+
+  return (
+    <div className={`h-full flex flex-col ${isSmall ? 'p-3' : 'p-4'} overflow-y-auto max-w-2xl mx-auto w-full`}>
+      <PlantCard title="QUICK LOG">
+        {msg && <StatusMessage type={msg.type} message={msg.text} />}
+
+        <Field label="Find a plant" value={q} onChange={setQ} placeholder="Search nickname, genus, species..." />
+        <PlantButton onClick={doSearch} variant="secondary">Search</PlantButton>
+
+        {hits.length > 0 && (
+          <div className="mt-3 space-y-2 max-h-48 overflow-y-auto">
+            {hits.map(h => (
+              <button key={h.uid}
+                onClick={() => setPicked(h)}
+                className={`w-full text-left bg-white p-3 rounded-lg border-4 ${picked && picked.uid === h.uid ? 'border-[#6B9C3D]' : 'border-[#8B4513]'}`}>
+                <div style={{ fontFamily:"'Pixelify Sans', cursive", fontWeight:900, color:'#4A3020' }}>{h.primary}</div>
+                <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', color:'#6B4423' }}>{h.genus} {h.species}</div>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {picked && (
+          <div className="mt-4 bg-white p-3 rounded-lg border-4 border-[#6B9C3D]">
+            <div style={{ fontFamily:"'Pixelify Sans', cursive", fontWeight:900, color:'#4A3020' }}>Logging for: {picked.primary}</div>
+
+            <div className="mt-3 space-y-2">
+              <label className="flex items-center gap-2" style={{ fontFamily:"'Pixelify Sans', cursive" }}>
+                <input type="checkbox" checked={water} onChange={e => setWater(e.target.checked)} />
+                💧 Watered
+              </label>
+              <label className="flex items-center gap-2" style={{ fontFamily:"'Pixelify Sans', cursive" }}>
+                <input type="checkbox" checked={fertilize} onChange={e => setFertilize(e.target.checked)} />
+                🌾 Fertilized
+              </label>
+              <label className="flex items-center gap-2" style={{ fontFamily:"'Pixelify Sans', cursive" }}>
+                <input type="checkbox" checked={repot} onChange={e => setRepot(e.target.checked)} />
+                🪴 Repotted
+              </label>
+            </div>
+
+            {repot && (
+              <div className="mt-3">
+                <Field label="Pot Size" value={potSize} onChange={setPotSize} />
+                <Field label="Substrate" value={substrate} onChange={setSubstrate} />
+                <Field label="Medium" value={medium} onChange={setMedium} />
+              </div>
+            )}
+
+            <Field label="Notes (optional)" value={notes} onChange={setNotes} type="textarea" />
+
+            <div className="mt-2">
+              <PlantButton onClick={submit}>Save Log</PlantButton>
+            </div>
+          </div>
+        )}
+
+        <div className="mt-4">
+          <PlantButton variant="ghost" onClick={goBack}>Back</PlantButton>
+        </div>
+      </PlantCard>
+    </div>
+  );
+}
+
+function LocationsScreen() {
+  const { goBack, navigate } = useNavigation();
+  const { locations, getPlantsByLocation, setNickname } = usePlantData();
+  const { isSmall } = useScreenSize();
+
+  const [selected, setSelected] = useState(BOOT.loc || (locations[0] || ''));
+  const [plants, setPlants] = useState([]);
+  const [state, setState] = useState('default');
+  const [msg, setMsg] = useState(null);
+
+  async function refresh(loc) {
+    if (!loc) return;
+    setState('loading');
+    try {
+      const rows = await getPlantsByLocation(loc);
+      setPlants(rows || []);
+      setState('default');
+    } catch {
+      setState('error');
+    }
+  }
+
+  useEffect(() => {
+    if (!selected && locations.length) setSelected(locations[0]);
+  }, [locations]);
+
+  useEffect(() => { if (selected) refresh(selected); }, [selected]);
+
+  const opts = (locations.length ? locations : [selected]).filter(Boolean);
+
+  const waterStatus = (enabled, due) => {
+    if (!enabled) return { t: 'No reminder', c: '#999' };
+    if (!due) return { t: 'No due', c: '#999' };
+    const d = new Date(due);
+    const today = new Date(); today.setHours(0,0,0,0);
+    if (d <= today) return { t: 'Needs water 💧', c: '#e74c3c' };
+    const diff = Math.ceil((d - today) / 86400000);
+    if (diff <= 3) return { t: `Due in ${diff}d`, c: '#e67e22' };
+    return { t: `Due ${due}`, c: '#27ae60' };
+  };
+
+  async function addNick(p) {
+    const nn = prompt('Nickname for this plant:', '');
+    if (!nn) return;
+    setMsg({ type:'loading', text:'Saving nickname...' });
+    try {
+      await setNickname(p.uid, nn);
+      await refresh(selected);
+      setMsg({ type:'success', text:'Saved ✅' });
+    } catch {
+      setMsg({ type:'error', text:'Failed' });
+    }
+    setTimeout(()=> setMsg(null), 1500);
+  }
+
+  return (
+    <div className={`h-full flex flex-col ${isSmall ? 'p-3' : 'p-4'} overflow-y-auto max-w-2xl mx-auto w-full`}>
+      <PlantCard title="LOCATIONS">
+        {msg && <StatusMessage type={msg.type} message={msg.text} />}
+        {state === 'loading' && <StatusMessage type="loading" message="Loading..." />}
+        {state === 'error' && <StatusMessage type="error" message="Failed to load plants" />}
+
+        <div className="mb-3">
+          <label className="block mb-2 text-[#4A3020]" style={{ fontFamily: "'Pixelify Sans', cursive", fontWeight: 900 }}>
+            Select Location
+          </label>
+          <select value={selected} onChange={e => setSelected(e.target.value)}
+            className="w-full px-3 py-2 bg-white border-4 border-[#8B4513] rounded-lg"
+            style={{ fontFamily: "'Pixelify Sans', cursive" }}>
+            {opts.map(l => <option key={l} value={l}>{l}</option>)}
+          </select>
+        </div>
+
+        <div className="space-y-2 max-h-96 overflow-y-auto">
+          {plants.map(p => {
+            const ws = waterStatus(p.reminderEnabled, p.due);
+            return (
+              <div key={p.uid} className="w-full bg-white p-3 rounded-lg border-4 border-[#8B4513]">
+                <button
+                  onClick={() => { window.location.href = `${BOOT.baseUrl}?mode=plant&uid=${encodeURIComponent(p.uid)}`; }}
+                  className="w-full text-left">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <div className="text-[#4A3020]" style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'14px', fontWeight:900 }}>
+                        {p.primary}
+                      </div>
+                      {p.secondary && (
+                        <div className="text-[#6B4423]" style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', fontWeight:700 }}>
+                          {p.secondary}
+                        </div>
+                      )}
+                      {p.meta && (
+                        <div className="text-[#6B4423]" style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'11px' }}>
+                          {p.meta}
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'11px', color: ws.c, fontWeight:900 }}>{ws.t}</div>
+                      <div style={{ fontFamily:"'Press Start 2P', cursive", fontSize:'9px', color:'#999' }}>UID {p.uid}</div>
+                    </div>
+                  </div>
+                </button>
+
+                {/* Only for missing nickname */}
+                {p.needsNickname && (
+                  <div className="mt-2">
+                    <PlantButton variant="ghost" onClick={() => addNick(p)}>Add a nickname?</PlantButton>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="mt-4 flex gap-2">
+          <PlantButton variant="ghost" onClick={goBack}>Back</PlantButton>
+          <PlantButton variant="secondary" onClick={() => navigate('home')}>Home</PlantButton>
+        </div>
+      </PlantCard>
+    </div>
+  );
+}
+
+function PlantLogScreen() {
+  const { goBack } = useNavigation();
+  const { getRecentLog } = usePlantData();
+  const { isSmall } = useScreenSize();
+  const [rows, setRows] = useState([]);
+  const [state, setState] = useState('loading');
+
+  useEffect(() => {
+    getRecentLog(25).then(r => { setRows(r || []); setState('default'); }).catch(()=> setState('error'));
+  }, []);
+
+  return (
+    <div className={`h-full flex flex-col ${isSmall ? 'p-3' : 'p-4'} overflow-y-auto max-w-2xl mx-auto w-full`}>
+      <PlantCard title="PLANT LOG">
+        {state === 'loading' && <StatusMessage type="loading" message="Loading..." />}
+        {state === 'error' && <StatusMessage type="error" message="Failed to load log" />}
+
+        <div className="space-y-2 max-h-96 overflow-y-auto">
+          {rows.map((r, i) => (
+            <div key={i} className="bg-white p-3 rounded-lg border-4 border-[#8B4513]">
+              <div className="flex justify-between">
+                <div style={{ fontFamily:"'Press Start 2P', cursive", fontSize:'10px', color:'#4A3020' }}>{r.action}</div>
+                <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'11px', color:'#6B4423' }}>{r.ts}</div>
+              </div>
+              {r.details && <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', color:'#4A3020' }}>{r.details}</div>}
+              <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'10px', color:'#999' }}>UID {r.uid}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4">
+          <PlantButton variant="ghost" onClick={goBack}>Back</PlantButton>
+        </div>
+      </PlantCard>
+    </div>
+  );
+}
+
+function PlantScreen() {
+  const { navigate } = useNavigation();
+  const { getPlant, getTimeline, quickLog, updatePlant, setNickname } = usePlantData();
+  const { isSmall } = useScreenSize();
+
+  const [plant, setPlant] = useState(null);
+  const [timeline, setTimeline] = useState([]);
+  const [state, setState] = useState('loading');
+  const [msg, setMsg] = useState(null);
+
+  const uid = BOOT.uid;
+
+  async function load() {
+    if (!uid) { setState('error'); return; }
+    try {
+      const p = await getPlant(uid);
+      if (!p) { setState('error'); return; }
+      setPlant(p);
+      setState('default');
+      const tl = await getTimeline(uid, 20);
+      setTimeline(tl || []);
+    } catch {
+      setState('error');
+    }
+  }
+
+  useEffect(() => { load(); }, []);
+
+  async function doWater() {
+    if (!plant) return;
+    setMsg({ type:'loading', text:'Saving...' });
+    try {
+      await quickLog(plant.uid, { water:true, fertilize:false, repot:false, notes:'' });
+      await load();
+      setMsg({ type:'success', text:'Saved ✅' });
+    } catch {
+      setMsg({ type:'error', text:'Failed' });
+    }
+    setTimeout(()=> setMsg(null), 1500);
+  }
+
+  async function doFert() {
+    if (!plant) return;
+    setMsg({ type:'loading', text:'Saving...' });
+    try {
+      await quickLog(plant.uid, { water:false, fertilize:true, repot:false, notes:'' });
+      await load();
+      setMsg({ type:'success', text:'Saved ✅' });
+    } catch {
+      setMsg({ type:'error', text:'Failed' });
+    }
+    setTimeout(()=> setMsg(null), 1500);
+  }
+
+  async function doRepot() {
+    if (!plant) return;
+    const pot = prompt('Pot size?', plant.potSize || '');
+    if (pot == null) return;
+    const sub = prompt('Substrate?', plant.substrate || plant.medium || '');
+    if (sub == null) return;
+    setMsg({ type:'loading', text:'Saving...' });
+    try {
+      await quickLog(plant.uid, { repot:true, potSize: pot, substrate: sub, notes:'' });
+      await updatePlant(plant.uid, { potSize: pot, substrate: sub });
+      await load();
+      setMsg({ type:'success', text:'Saved ✅' });
+    } catch {
+      setMsg({ type:'error', text:'Failed' });
+    }
+    setTimeout(()=> setMsg(null), 1500);
+  }
+
+  async function addNick() {
+    if (!plant) return;
+    const nn = prompt('Nickname:', '');
+    if (!nn) return;
+    setMsg({ type:'loading', text:'Saving nickname...' });
+    try {
+      await setNickname(plant.uid, nn);
+      await load();
+      setMsg({ type:'success', text:'Saved ✅' });
+    } catch {
+      setMsg({ type:'error', text:'Failed' });
+    }
+    setTimeout(()=> setMsg(null), 1500);
+  }
+
+  async function edit() {
+    if (!plant) return;
+    const nn = prompt('Nick-name:', plant.nickname || '');
+    if (nn == null) return;
+    const cls = prompt('Classification:', plant.classification || '');
+    if (cls == null) return;
+    const g = prompt('Genus:', plant.genus || '');
+    if (g == null) return;
+    const sp = prompt('Species:', plant.species || '');
+    if (sp == null) return;
+    const every = prompt('Water how often? (days):', plant.everyDays || '');
+    if (every == null) return;
+
+    setMsg({ type:'loading', text:'Saving...' });
+    try {
+      await updatePlant(plant.uid, { nickname: nn, classification: cls, genus: g, species: sp, everyDays: every, recomputeDue:true });
+      await load();
+      setMsg({ type:'success', text:'Saved ✅' });
+    } catch {
+      setMsg({ type:'error', text:'Failed' });
+    }
+    setTimeout(()=> setMsg(null), 1500);
+  }
+
+  return (
+    <div className={`h-full flex flex-col ${isSmall ? 'p-3' : 'p-4'} overflow-y-auto max-w-2xl mx-auto w-full`}>
+      <PlantCard title="PLANT PAGE">
+        {state === 'loading' && <StatusMessage type="loading" message="Loading specimen..." />}
+        {state === 'error' && <StatusMessage type="error" message="Plant not found" />}
+        {msg && <StatusMessage type={msg.type} message={msg.text} />}
+
+        {plant && (
+          <>
+            <div className="bg-white p-3 rounded-lg border-4 border-[#6B9C3D] mb-3">
+              <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'18px', fontWeight:900, color:'#4A3020' }}>
+                {plant.nickname || plant.primary}
+              </div>
+              <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', color:'#6B4423', fontWeight:800 }}>
+                {[plant.classification, plant.gs].filter(Boolean).join(' • ')}
+              </div>
+              <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'11px', color:'#999' }}>
+                {plant.humanPlantId ? `Plant ID: ${plant.humanPlantId} • ` : ''}UID {plant.uid}
+              </div>
+
+              {!plant.nickname && (
+                <div className="mt-2">
+                  <PlantButton variant="ghost" onClick={addNick}>Add a nickname?</PlantButton>
+                </div>
+              )}
+            </div>
+
+            <div className="bg-white p-3 rounded-lg border-4 border-[#8B4513] mb-3">
+              <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', color:'#4A3020' }}>
+                🎂 Birthday: {plant.birthday || '—'}
+              </div>
+              <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', color:'#4A3020' }}>
+                💧 Last Watered: {plant.lastWatered || '—'} • Next Due: {plant.due || '—'} • Every: {plant.everyDays || '—'}d
+              </div>
+              <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', color:'#4A3020' }}>
+                🌾 Last Fertilized: {plant.lastFertilized || '—'}
+              </div>
+              <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', color:'#4A3020' }}>
+                🪴 Pot: {plant.potSize || '—'} • Substrate: {plant.substrate || plant.medium || '—'}
+              </div>
+              {plant.careDocUrl && (
+                <div className="mt-2">
+                  <a href={plant.careDocUrl} target="_blank" style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', color:'#2980b9', fontWeight:900 }}>
+                    📄 Open Care Log Doc
+                  </a>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2 mb-4">
+              <PlantButton onClick={doWater}>💧 Watered</PlantButton>
+              <PlantButton onClick={doFert}>🌾 Fertilized</PlantButton>
+              <PlantButton onClick={doRepot}>🪴 Repot</PlantButton>
+              <PlantButton variant="secondary" onClick={edit}>✏️ Edit</PlantButton>
+              <PlantButton variant="ghost" onClick={() => navigate('home')}>Home</PlantButton>
+            </div>
+
+            <div className="bg-white p-3 rounded-lg border-4 border-[#C8B488]">
+              <div style={{ fontFamily:"'Pixelify Sans', cursive", fontWeight:900, color:'#4A3020' }}>
+                Recent Timeline
+              </div>
+              <div className="mt-2 space-y-2 max-h-48 overflow-y-auto">
+                {timeline.map((t, i) => (
+                  <div key={i} className="border-b border-[#eee] pb-1">
+                    <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'11px', color:'#6B4423' }}>{t.ts}</div>
+                    <div style={{ fontFamily:"'Press Start 2P', cursive", fontSize:'10px', color:'#4A3020' }}>{t.action}</div>
+                    {t.details && <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', color:'#4A3020' }}>{t.details}</div>}
+                  </div>
+                ))}
+                {timeline.length === 0 && (
+                  <div style={{ fontFamily:"'Pixelify Sans', cursive", color:'#4A3020' }}>No entries yet.</div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+      </PlantCard>
+    </div>
+  );
+}
+
+function SpecScreen() {
+  const { goBack } = useNavigation();
+  const { isSmall } = useScreenSize();
+  return (
+    <div className={`h-full flex flex-col ${isSmall ? 'p-3' : 'p-4'} overflow-y-auto max-w-2xl mx-auto w-full`}>
+      <PlantCard title="SPEC">
+        <div style={{ fontFamily:"'Pixelify Sans', cursive", fontSize:'12px', color:'#4A3020' }}>
+          QR opens Plant Page:
+          <br/>?mode=plant&uid=########
+          <br/><br/>Display order everywhere:
+          <br/>Nick-name → (Display/Name fallback) → Genus Species → UID (last)
+          <br/><br/>Location list shows DOB + Pot/Substrate.
+          <br/>Duplicates auto-number as #2, #3 when no nickname.
+        </div>
+        <div className="mt-4">
+          <PlantButton variant="ghost" onClick={goBack}>Back</PlantButton>
+        </div>
+      </PlantCard>
+    </div>
+  );
+}
+
+/* ===================== ROLLING TICKER ===================== */
+function Ticker() {
+  const { homeData } = usePlantData();
+  const [now, setNow] = useState(new Date());
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const birthdays = (homeData && homeData.birthdays) ? homeData.birthdays : [];
+  const dueNow = (homeData && homeData.dueNow) ? homeData.dueNow : [];
+
+  const msg = [
+    format12h(now),
+    birthdays.length ? `Todays birthdays: ${birthdays.join(', ')}` : `No birthdays today`,
+    dueNow.length ? `Needs water: ${dueNow.length}` : `No plants due now`
+  ].join('   •   ');
+
+  return (
+    <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 w-[92%] max-w-2xl overflow-hidden">
+      <div className="bg-[#6B4423] text-[#F4E4C1] border-4 border-[#4A3020] rounded-xl px-4 py-2 shadow-lg">
+        <div className="ticker-track" style={{ fontFamily:"'Press Start 2P', cursive", fontSize:'10px' }}>
+          {msg}   •   {msg}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ===================== APP SHELL ===================== */
+function AppContent() {
+  const { currentScreen, navigate } = useNavigation();
+
+  const render = () => {
+    switch (currentScreen) {
+      case 'home': return <HomeScreen />;
+      case 'watering': return <WateringScreen />;
+      case 'quick-log': return <QuickLogScreen />;
+      case 'add-basic': return <AddBasicScreen />;
+      case 'add-advanced': return <AddAdvancedScreen />;
+      case 'locations': return <LocationsScreen />;
+      case 'plant-log': return <PlantLogScreen />;
+      case 'plant': return <PlantScreen />;
+      case 'spec': return <SpecScreen />;
+      default: return <HomeScreen />;
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-full relative overflow-hidden">
+      <div className="absolute inset-0 bg-[#8BC34A]">
+        <div className="absolute inset-0 opacity-20" style={{
+          backgroundImage: `repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.1) 2px,rgba(0,0,0,0.1) 4px),
+                           repeating-linear-gradient(90deg,transparent,transparent 2px,rgba(0,0,0,0.1) 2px,rgba(0,0,0,0.1) 4px)`
+        }} />
+        <div className="absolute bottom-20 left-[10%] text-4xl">🌻</div>
+        <div className="absolute bottom-32 left-[25%] text-3xl">🌷</div>
+        <div className="absolute bottom-24 right-[15%] text-4xl">🌺</div>
+        <div className="absolute bottom-40 right-[30%] text-3xl">🌼</div>
+        <div className="absolute top-20 left-[20%] text-2xl">🦋</div>
+        <div className="absolute top-32 right-[25%] text-2xl">🐝</div>
+        <div className="absolute top-8 right-8 w-16 h-16 bg-[#FFD700] rounded-full border-4 border-[#FFA500] shadow-lg"></div>
+      </div>
+
+      {currentScreen !== 'home' && (
+        <div className="absolute top-4 left-4 z-20">
+          <PlantButton onClick={() => navigate('home')} variant="secondary" className="px-3 py-2">
+            🏠 Home
+          </PlantButton>
+        </div>
+      )}
+
+      <div className="flex-1 flex items-center justify-center relative z-10 overflow-auto py-8">
+        {render()}
+      </div>
+
+      <Ticker />
+    </div>
+  );
+}
+
+function PlantOSApp() {
+  return (
+    <NavigationProvider>
+      <PlantDataProvider>
+        <AppContent />
+      </PlantDataProvider>
+    </NavigationProvider>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<PlantOSApp />);
+</script>
 </body>
 </html>
