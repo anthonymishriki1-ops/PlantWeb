@@ -1,0 +1,1097 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Retro Arcade ~ Pong & Tamagotchi</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #1a1a2e;
+    color: #eee;
+    font-family: 'Press Start 2P', monospace;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Scanline overlay */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.08) 2px,
+      rgba(0,0,0,0.08) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  /* Stars background */
+  .stars {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+  }
+  .stars span {
+    position: absolute;
+    width: 3px; height: 3px;
+    background: #fff;
+    border-radius: 50%;
+    animation: twinkle 2s infinite alternate;
+  }
+
+  @keyframes twinkle {
+    0% { opacity: 0.2; }
+    100% { opacity: 1; }
+  }
+
+  .container {
+    position: relative;
+    z-index: 1;
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 20px;
+  }
+
+  h1 {
+    text-align: center;
+    font-size: 1.6rem;
+    margin: 20px 0 10px;
+    background: linear-gradient(90deg, #ff6b9d, #c44dff, #6bdfff, #ff6b9d);
+    background-size: 300% 100%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: shimmer 4s linear infinite;
+  }
+
+  @keyframes shimmer {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 300% 50%; }
+  }
+
+  .subtitle {
+    text-align: center;
+    font-size: 0.55rem;
+    color: #ff9dd6;
+    margin-bottom: 30px;
+    letter-spacing: 2px;
+  }
+
+  /* Tab navigation */
+  .tabs {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  .tab-btn {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.65rem;
+    padding: 12px 24px;
+    border: 3px solid #444;
+    background: #16213e;
+    color: #888;
+    cursor: pointer;
+    border-radius: 8px 8px 0 0;
+    transition: all 0.2s;
+  }
+  .tab-btn:hover { border-color: #c44dff; color: #ddd; }
+  .tab-btn.active {
+    background: #0f3460;
+    border-color: #c44dff;
+    color: #fff;
+    box-shadow: 0 0 15px rgba(196,77,255,0.3);
+  }
+
+  .game-panel {
+    display: none;
+    background: #0f3460;
+    border: 3px solid #c44dff;
+    border-radius: 0 12px 12px 12px;
+    padding: 20px;
+    box-shadow: 0 0 30px rgba(196,77,255,0.15);
+  }
+  .game-panel.active { display: block; }
+
+  /* ===== PONG ===== */
+  #pong-wrapper { text-align: center; }
+  #pong-wrapper h2 {
+    font-size: 0.9rem;
+    color: #6bdfff;
+    margin-bottom: 15px;
+  }
+  #pongCanvas {
+    border: 3px solid #6bdfff;
+    border-radius: 6px;
+    background: #0a0a23;
+    display: block;
+    margin: 0 auto;
+    box-shadow: 0 0 20px rgba(107,223,255,0.2);
+    max-width: 100%;
+  }
+  .pong-score {
+    font-size: 1.2rem;
+    margin: 12px 0;
+    color: #6bdfff;
+  }
+  .pong-score span { margin: 0 20px; }
+  .pong-info {
+    font-size: 0.45rem;
+    color: #aaa;
+    margin-top: 8px;
+    line-height: 1.8;
+  }
+  .pong-controls {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 12px;
+  }
+  .pong-btn {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.5rem;
+    padding: 8px 16px;
+    border: 2px solid #6bdfff;
+    background: transparent;
+    color: #6bdfff;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .pong-btn:hover {
+    background: #6bdfff;
+    color: #0a0a23;
+  }
+
+  /* ===== TAMAGOTCHI ===== */
+  #tama-wrapper { text-align: center; }
+  #tama-wrapper h2 {
+    font-size: 0.9rem;
+    color: #ff6b9d;
+    margin-bottom: 15px;
+  }
+
+  .tama-screen {
+    width: 320px;
+    height: 320px;
+    margin: 0 auto;
+    background: #c8e6a0;
+    border: 6px solid #555;
+    border-radius: 20px;
+    position: relative;
+    box-shadow: inset 0 0 30px rgba(0,0,0,0.1), 0 0 20px rgba(255,107,157,0.2);
+    overflow: hidden;
+    image-rendering: pixelated;
+  }
+
+  .tama-pet {
+    position: absolute;
+    bottom: 60px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 64px;
+    transition: transform 0.3s;
+    filter: drop-shadow(2px 2px 0 rgba(0,0,0,0.15));
+  }
+  .tama-pet.bounce {
+    animation: petBounce 0.5s ease;
+  }
+  @keyframes petBounce {
+    0%,100% { transform: translateX(-50%) translateY(0); }
+    50% { transform: translateX(-50%) translateY(-20px); }
+  }
+
+  .tama-pet.happy { animation: petHappy 0.6s ease; }
+  @keyframes petHappy {
+    0%,100% { transform: translateX(-50%) rotate(0); }
+    25% { transform: translateX(-50%) rotate(-10deg); }
+    75% { transform: translateX(-50%) rotate(10deg); }
+  }
+
+  .tama-pet.sad { animation: petSad 0.8s ease; }
+  @keyframes petSad {
+    0%,100% { transform: translateX(-50%) translateY(0); }
+    50% { transform: translateX(-50%) translateY(5px); }
+  }
+
+  .tama-pet.sleeping { opacity: 0.6; }
+
+  .tama-status-overlay {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 7px;
+    color: #2a4a2a;
+    font-family: 'Press Start 2P', monospace;
+  }
+
+  .tama-thought {
+    position: absolute;
+    top: 60px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 28px;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  .tama-thought.show { opacity: 1; }
+
+  .tama-name-display {
+    position: absolute;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 8px;
+    color: #2a4a2a;
+    font-family: 'Press Start 2P', monospace;
+    white-space: nowrap;
+  }
+
+  .tama-age-display {
+    position: absolute;
+    bottom: 26px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 6px;
+    color: #4a6a4a;
+    font-family: 'Press Start 2P', monospace;
+    white-space: nowrap;
+  }
+
+  .tama-poop {
+    position: absolute;
+    bottom: 70px;
+    font-size: 24px;
+    transition: opacity 0.3s;
+  }
+
+  .tama-bars {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin: 15px 0;
+    flex-wrap: wrap;
+  }
+  .tama-bar {
+    text-align: center;
+  }
+  .tama-bar label {
+    font-size: 0.4rem;
+    color: #ff9dd6;
+    display: block;
+    margin-bottom: 4px;
+  }
+  .tama-bar-track {
+    width: 80px;
+    height: 12px;
+    background: #222;
+    border: 2px solid #555;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .tama-bar-fill {
+    height: 100%;
+    transition: width 0.5s, background 0.5s;
+    border-radius: 4px;
+  }
+
+  .tama-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .tama-btn {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.45rem;
+    padding: 8px 12px;
+    border: 2px solid #ff6b9d;
+    background: transparent;
+    color: #ff6b9d;
+    border-radius: 50%;
+    width: 65px;
+    height: 65px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+  }
+  .tama-btn .btn-icon { font-size: 18px; }
+  .tama-btn:hover {
+    background: #ff6b9d;
+    color: #1a1a2e;
+  }
+  .tama-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+
+  .tama-log {
+    margin-top: 15px;
+    max-height: 80px;
+    overflow-y: auto;
+    font-size: 0.4rem;
+    color: #aaa;
+    text-align: left;
+    padding: 8px;
+    background: rgba(0,0,0,0.3);
+    border-radius: 6px;
+    line-height: 1.8;
+  }
+  .tama-log::-webkit-scrollbar { width: 4px; }
+  .tama-log::-webkit-scrollbar-thumb { background: #555; border-radius: 4px; }
+
+  /* Evolution modal */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.8);
+    z-index: 1000;
+    justify-content: center;
+    align-items: center;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal-box {
+    background: #1a1a2e;
+    border: 3px solid #c44dff;
+    border-radius: 12px;
+    padding: 30px;
+    text-align: center;
+    box-shadow: 0 0 40px rgba(196,77,255,0.4);
+    max-width: 350px;
+  }
+  .modal-box h3 { color: #c44dff; font-size: 0.8rem; margin-bottom: 15px; }
+  .modal-box .evo-pet { font-size: 80px; margin: 15px 0; }
+  .modal-box p { font-size: 0.5rem; color: #ccc; line-height: 2; margin-bottom: 15px; }
+  .modal-box button {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.5rem;
+    padding: 10px 20px;
+    border: 2px solid #c44dff;
+    background: transparent;
+    color: #c44dff;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .modal-box button:hover { background: #c44dff; color: #fff; }
+
+  /* Name input */
+  .name-input-area {
+    margin: 10px 0;
+  }
+  .name-input-area input {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.5rem;
+    padding: 8px 12px;
+    border: 2px solid #ff6b9d;
+    background: #16213e;
+    color: #fff;
+    border-radius: 6px;
+    width: 160px;
+    text-align: center;
+  }
+  .name-input-area button {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 0.45rem;
+    padding: 8px 14px;
+    border: 2px solid #ff6b9d;
+    background: #ff6b9d;
+    color: #1a1a2e;
+    border-radius: 6px;
+    cursor: pointer;
+    margin-left: 6px;
+  }
+
+  /* Dead overlay */
+  .tama-dead-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    border-radius: 16px;
+    z-index: 10;
+  }
+  .tama-dead-overlay.show { display: flex; }
+  .tama-dead-overlay .rip { font-size: 40px; margin-bottom: 8px; }
+  .tama-dead-overlay p {
+    font-size: 7px;
+    color: #ccc;
+    font-family: 'Press Start 2P', monospace;
+  }
+
+  footer {
+    text-align: center;
+    margin-top: 30px;
+    font-size: 0.4rem;
+    color: #555;
+    padding-bottom: 20px;
+  }
+</style>
+</head>
+<body>
+
+<!-- Stars -->
+<div class="stars" id="stars"></div>
+
+<div class="container">
+  <h1>RETRO ARCADE</h1>
+  <p class="subtitle">~ pong & tamagotchi ~</p>
+
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('pong')">PONG</button>
+    <button class="tab-btn" onclick="switchTab('tama')">TAMAGOTCHI</button>
+  </div>
+
+  <!-- ===== PONG GAME ===== -->
+  <div class="game-panel active" id="panel-pong">
+    <div id="pong-wrapper">
+      <h2>~ PONG vs CPU ~</h2>
+      <div class="pong-score">
+        <span id="p-score">0</span> : <span id="cpu-score">0</span>
+      </div>
+      <canvas id="pongCanvas" width="600" height="400"></canvas>
+      <div class="pong-controls">
+        <button class="pong-btn" onclick="pongReset()">RESET</button>
+        <button class="pong-btn" id="pauseBtn" onclick="pongPause()">PAUSE</button>
+      </div>
+      <p class="pong-info">
+        W / S or Arrow keys to move &bull; First to 7 wins!<br>
+        Touch: tap top/bottom half to move
+      </p>
+    </div>
+  </div>
+
+  <!-- ===== TAMAGOTCHI GAME ===== -->
+  <div class="game-panel" id="panel-tama">
+    <div id="tama-wrapper">
+      <h2>~ TAMAGOTCHI ~</h2>
+
+      <div class="tama-screen" id="tamaScreen">
+        <div class="tama-status-overlay">
+          <span id="tama-mood-icon"></span>
+          <span id="tama-stage-label"></span>
+        </div>
+        <div class="tama-thought" id="tamThought"></div>
+        <div class="tama-pet" id="tamaPet">🥒</div>
+        <div class="tama-age-display" id="tamaAge"></div>
+        <div class="tama-name-display" id="tamaNameDisplay"></div>
+        <div class="tama-dead-overlay" id="tamaDeadOverlay">
+          <div class="rip">🪦</div>
+          <p>Your pet has passed away...</p>
+          <p style="margin-top:8px;">Press NEW PET to try again</p>
+        </div>
+      </div>
+
+      <div class="tama-bars">
+        <div class="tama-bar">
+          <label>HUNGER</label>
+          <div class="tama-bar-track"><div class="tama-bar-fill" id="bar-hunger" style="width:80%;background:#5cdb5c;"></div></div>
+        </div>
+        <div class="tama-bar">
+          <label>HAPPY</label>
+          <div class="tama-bar-track"><div class="tama-bar-fill" id="bar-happy" style="width:80%;background:#ffd700;"></div></div>
+        </div>
+        <div class="tama-bar">
+          <label>ENERGY</label>
+          <div class="tama-bar-track"><div class="tama-bar-fill" id="bar-energy" style="width:80%;background:#6bdfff;"></div></div>
+        </div>
+        <div class="tama-bar">
+          <label>HEALTH</label>
+          <div class="tama-bar-track"><div class="tama-bar-fill" id="bar-health" style="width:100%;background:#ff6b9d;"></div></div>
+        </div>
+      </div>
+
+      <div class="tama-buttons">
+        <button class="tama-btn" onclick="tamaFeed()" id="btn-feed">
+          <span class="btn-icon">🍔</span>Feed
+        </button>
+        <button class="tama-btn" onclick="tamaPlay()" id="btn-play">
+          <span class="btn-icon">⚽</span>Play
+        </button>
+        <button class="tama-btn" onclick="tamaSleep()" id="btn-sleep">
+          <span class="btn-icon">💤</span>Sleep
+        </button>
+        <button class="tama-btn" onclick="tamaClean()" id="btn-clean">
+          <span class="btn-icon">🧹</span>Clean
+        </button>
+        <button class="tama-btn" onclick="tamaMedicine()" id="btn-med">
+          <span class="btn-icon">💊</span>Heal
+        </button>
+        <button class="tama-btn" onclick="tamaNewPet()">
+          <span class="btn-icon">🥚</span>New
+        </button>
+      </div>
+
+      <div class="name-input-area" id="nameArea">
+        <input type="text" id="nameInput" placeholder="Name..." maxlength="10">
+        <button onclick="tamaSetName()">OK</button>
+      </div>
+
+      <div class="tama-log" id="tamaLog"></div>
+    </div>
+  </div>
+
+  <footer>Made with pixels & love</footer>
+</div>
+
+<!-- Evolution Modal -->
+<div class="modal-overlay" id="evoModal">
+  <div class="modal-box">
+    <h3>EVOLUTION!</h3>
+    <div class="evo-pet" id="evoPet"></div>
+    <p id="evoText"></p>
+    <button onclick="closeEvoModal()">YAY!</button>
+  </div>
+</div>
+
+<script>
+// ============================================================
+//  STARS
+// ============================================================
+(function() {
+  const c = document.getElementById('stars');
+  for (let i = 0; i < 80; i++) {
+    const s = document.createElement('span');
+    s.style.left = Math.random()*100+'%';
+    s.style.top = Math.random()*100+'%';
+    s.style.animationDelay = (Math.random()*3)+'s';
+    s.style.width = s.style.height = (1+Math.random()*2)+'px';
+    c.appendChild(s);
+  }
+})();
+
+// ============================================================
+//  TABS
+// ============================================================
+function switchTab(id) {
+  document.querySelectorAll('.tab-btn').forEach((b,i) => {
+    b.classList.toggle('active', (id==='pong'?i===0:i===1));
+  });
+  document.getElementById('panel-pong').classList.toggle('active', id==='pong');
+  document.getElementById('panel-tama').classList.toggle('active', id==='tama');
+}
+
+// ============================================================
+//  PONG
+// ============================================================
+const canvas = document.getElementById('pongCanvas');
+const ctx = canvas.getContext('2d');
+
+const PADDLE_W = 12, PADDLE_H = 70, BALL_R = 8, WIN_SCORE = 7;
+const CPU_SPEED = 3.5;
+
+let pong = {
+  player: { y: 165, score: 0 },
+  cpu: { y: 165, score: 0 },
+  ball: { x: 300, y: 200, vx: 4, vy: 3 },
+  paused: false,
+  over: false,
+  keys: {}
+};
+
+document.addEventListener('keydown', e => {
+  pong.keys[e.key] = true;
+  if (['ArrowUp','ArrowDown','w','s'].includes(e.key)) e.preventDefault();
+});
+document.addEventListener('keyup', e => pong.keys[e.key] = false);
+
+// Touch controls for mobile
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const touchY = e.touches[0].clientY - rect.top;
+  const mid = rect.height / 2;
+  if (touchY < mid) { pong.keys['ArrowUp'] = true; pong.keys['ArrowDown'] = false; }
+  else { pong.keys['ArrowDown'] = true; pong.keys['ArrowUp'] = false; }
+});
+canvas.addEventListener('touchend', e => {
+  pong.keys['ArrowUp'] = false;
+  pong.keys['ArrowDown'] = false;
+});
+
+function pongReset() {
+  pong.player = { y: 165, score: 0 };
+  pong.cpu = { y: 165, score: 0 };
+  pong.over = false;
+  pong.paused = false;
+  document.getElementById('pauseBtn').textContent = 'PAUSE';
+  resetBall();
+  updatePongScore();
+}
+
+function pongPause() {
+  if (pong.over) return;
+  pong.paused = !pong.paused;
+  document.getElementById('pauseBtn').textContent = pong.paused ? 'PLAY' : 'PAUSE';
+}
+
+function resetBall() {
+  pong.ball.x = 300;
+  pong.ball.y = 200;
+  const angle = (Math.random() - 0.5) * Math.PI / 3;
+  const dir = Math.random() < 0.5 ? 1 : -1;
+  const speed = 4.5;
+  pong.ball.vx = dir * speed * Math.cos(angle);
+  pong.ball.vy = speed * Math.sin(angle);
+}
+
+function updatePongScore() {
+  document.getElementById('p-score').textContent = pong.player.score;
+  document.getElementById('cpu-score').textContent = pong.cpu.score;
+}
+
+function pongLoop() {
+  requestAnimationFrame(pongLoop);
+  if (pong.paused || pong.over) { drawPong(); return; }
+
+  // Player movement
+  const spd = 5;
+  if (pong.keys['ArrowUp'] || pong.keys['w']) pong.player.y -= spd;
+  if (pong.keys['ArrowDown'] || pong.keys['s']) pong.player.y += spd;
+  pong.player.y = Math.max(0, Math.min(canvas.height - PADDLE_H, pong.player.y));
+
+  // CPU AI
+  const cpuCenter = pong.cpu.y + PADDLE_H / 2;
+  const diff = pong.ball.y - cpuCenter;
+  if (Math.abs(diff) > 10) {
+    pong.cpu.y += Math.sign(diff) * Math.min(CPU_SPEED, Math.abs(diff));
+  }
+  pong.cpu.y = Math.max(0, Math.min(canvas.height - PADDLE_H, pong.cpu.y));
+
+  // Ball movement
+  const b = pong.ball;
+  b.x += b.vx;
+  b.y += b.vy;
+
+  // Top/bottom bounce
+  if (b.y - BALL_R <= 0 || b.y + BALL_R >= canvas.height) {
+    b.vy *= -1;
+    b.y = b.y - BALL_R <= 0 ? BALL_R : canvas.height - BALL_R;
+  }
+
+  // Paddle collisions
+  // Player paddle (left)
+  if (b.x - BALL_R <= PADDLE_W + 10 && b.y >= pong.player.y && b.y <= pong.player.y + PADDLE_H && b.vx < 0) {
+    b.vx = Math.abs(b.vx) * 1.05;
+    const hitPos = (b.y - pong.player.y) / PADDLE_H - 0.5;
+    b.vy = hitPos * 8;
+    b.x = PADDLE_W + 10 + BALL_R;
+  }
+  // CPU paddle (right)
+  if (b.x + BALL_R >= canvas.width - PADDLE_W - 10 && b.y >= pong.cpu.y && b.y <= pong.cpu.y + PADDLE_H && b.vx > 0) {
+    b.vx = -Math.abs(b.vx) * 1.05;
+    const hitPos = (b.y - pong.cpu.y) / PADDLE_H - 0.5;
+    b.vy = hitPos * 8;
+    b.x = canvas.width - PADDLE_W - 10 - BALL_R;
+  }
+
+  // Cap speed
+  const maxSpd = 10;
+  const curSpd = Math.sqrt(b.vx*b.vx + b.vy*b.vy);
+  if (curSpd > maxSpd) {
+    b.vx = (b.vx/curSpd)*maxSpd;
+    b.vy = (b.vy/curSpd)*maxSpd;
+  }
+
+  // Scoring
+  if (b.x < -20) {
+    pong.cpu.score++;
+    updatePongScore();
+    if (pong.cpu.score >= WIN_SCORE) { pong.over = true; }
+    else resetBall();
+  }
+  if (b.x > canvas.width + 20) {
+    pong.player.score++;
+    updatePongScore();
+    if (pong.player.score >= WIN_SCORE) { pong.over = true; }
+    else resetBall();
+  }
+
+  drawPong();
+}
+
+function drawPong() {
+  ctx.fillStyle = '#0a0a23';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Center line
+  ctx.setLineDash([8, 8]);
+  ctx.strokeStyle = 'rgba(107,223,255,0.2)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(canvas.width/2, 0);
+  ctx.lineTo(canvas.width/2, canvas.height);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Paddles (with glow)
+  ctx.shadowColor = '#6bdfff';
+  ctx.shadowBlur = 12;
+  ctx.fillStyle = '#6bdfff';
+  ctx.fillRect(10, pong.player.y, PADDLE_W, PADDLE_H);
+  ctx.shadowColor = '#ff6b9d';
+  ctx.fillStyle = '#ff6b9d';
+  ctx.fillRect(canvas.width - PADDLE_W - 10, pong.cpu.y, PADDLE_W, PADDLE_H);
+
+  // Ball (with glow)
+  ctx.shadowColor = '#fff';
+  ctx.shadowBlur = 15;
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(pong.ball.x, pong.ball.y, BALL_R, 0, Math.PI*2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // Game over text
+  if (pong.over) {
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.font = '20px "Press Start 2P"';
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    const winner = pong.player.score >= WIN_SCORE ? 'YOU WIN!' : 'CPU WINS!';
+    ctx.fillText(winner, canvas.width/2, canvas.height/2 - 10);
+    ctx.font = '10px "Press Start 2P"';
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('Press RESET to play again', canvas.width/2, canvas.height/2 + 25);
+  }
+}
+
+pongLoop();
+
+// ============================================================
+//  TAMAGOTCHI
+// ============================================================
+
+const STAGES = [
+  { name: 'Egg',     minAge: 0,   sprites: ['🥚'] },
+  { name: 'Baby',    minAge: 1,   sprites: ['🐣','🐥'] },
+  { name: 'Child',   minAge: 5,   sprites: ['🐱','🐶','🐰','🐹'] },
+  { name: 'Teen',    minAge: 15,  sprites: ['🦊','🐼','🐨','🦄'] },
+  { name: 'Adult',   minAge: 30,  sprites: ['🦁','🐯','🐲','🦋','🐙'] },
+  { name: 'Elder',   minAge: 60,  sprites: ['🦉','🐢','🐘','🦚'] },
+];
+
+let tama = null;
+const TICK_MS = 3000; // 3 seconds per "minute" of pet time
+let tamaInterval = null;
+
+function newTama() {
+  return {
+    name: '',
+    age: 0,         // in ticks
+    hunger: 80,     // 0-100 (0=starving)
+    happiness: 80,
+    energy: 80,
+    health: 100,
+    poopCount: 0,
+    poopPositions: [],
+    isSick: false,
+    isSleeping: false,
+    isDead: false,
+    stage: 0,
+    sprite: '🥚',
+    lastFed: 0,
+    lastPlayed: 0,
+    overFedCount: 0,
+  };
+}
+
+function tamaNewPet() {
+  if (tamaInterval) clearInterval(tamaInterval);
+  tama = newTama();
+  document.getElementById('tamaDeadOverlay').classList.remove('show');
+  document.getElementById('nameArea').style.display = 'block';
+  document.getElementById('nameInput').value = '';
+  clearPoops();
+  tamaLog('A new egg appeared!');
+  tamaRender();
+  tamaInterval = setInterval(tamaTick, TICK_MS);
+}
+
+function tamaSetName() {
+  const name = document.getElementById('nameInput').value.trim() || 'Buddy';
+  tama.name = name;
+  document.getElementById('nameArea').style.display = 'none';
+  tamaLog(name + ' is ready to hatch!');
+  tamaRender();
+}
+
+function tamaTick() {
+  if (!tama || tama.isDead) return;
+  tama.age++;
+
+  // Stat decay
+  if (!tama.isSleeping) {
+    tama.hunger = Math.max(0, tama.hunger - (1.2 + tama.stage * 0.15));
+    tama.happiness = Math.max(0, tama.happiness - (0.8 + tama.stage * 0.1));
+    tama.energy = Math.max(0, tama.energy - 0.6);
+  } else {
+    // Sleeping restores energy
+    tama.energy = Math.min(100, tama.energy + 3);
+    tama.hunger = Math.max(0, tama.hunger - 0.4);
+    // Wake up when full energy
+    if (tama.energy >= 100) {
+      tama.isSleeping = false;
+      tamaLog(tama.name + ' woke up refreshed!');
+    }
+  }
+
+  // Random poop
+  if (!tama.isSleeping && tama.stage > 0 && Math.random() < 0.08) {
+    tama.poopCount++;
+    tama.poopPositions.push({
+      left: 30 + Math.random() * 240,
+    });
+    renderPoops();
+  }
+
+  // Sickness check
+  if (!tama.isSick) {
+    let sickChance = 0;
+    if (tama.hunger < 20) sickChance += 0.05;
+    if (tama.poopCount >= 3) sickChance += 0.06;
+    if (tama.happiness < 15) sickChance += 0.03;
+    if (Math.random() < sickChance) {
+      tama.isSick = true;
+      tamaLog(tama.name + ' got sick! Give medicine!');
+    }
+  }
+
+  // Health effects
+  if (tama.isSick) tama.health = Math.max(0, tama.health - 2);
+  if (tama.hunger <= 0) tama.health = Math.max(0, tama.health - 1.5);
+  if (tama.poopCount >= 4) tama.health = Math.max(0, tama.health - 0.5);
+
+  // Heal slowly when not sick and well-fed
+  if (!tama.isSick && tama.hunger > 50 && tama.health < 100) {
+    tama.health = Math.min(100, tama.health + 0.3);
+  }
+
+  // Death check
+  if (tama.health <= 0) {
+    tama.isDead = true;
+    tamaLog(tama.name + ' has passed away... RIP');
+    document.getElementById('tamaDeadOverlay').classList.add('show');
+    clearInterval(tamaInterval);
+  }
+
+  // Evolution check
+  checkEvolution();
+
+  tamaRender();
+}
+
+function checkEvolution() {
+  for (let i = STAGES.length - 1; i >= 0; i--) {
+    if (tama.age >= STAGES[i].minAge && tama.stage < i) {
+      const oldStage = tama.stage;
+      tama.stage = i;
+      const sprites = STAGES[i].sprites;
+      tama.sprite = sprites[Math.floor(Math.random() * sprites.length)];
+      tamaLog(tama.name + ' evolved to ' + STAGES[i].name + ' stage!');
+      showEvoModal(STAGES[i].name, tama.sprite);
+      break;
+    }
+  }
+}
+
+function showEvoModal(stage, sprite) {
+  document.getElementById('evoPet').textContent = sprite;
+  document.getElementById('evoText').textContent = tama.name + ' evolved into a ' + stage + '!';
+  document.getElementById('evoModal').classList.add('show');
+}
+function closeEvoModal() {
+  document.getElementById('evoModal').classList.remove('show');
+}
+
+// Actions
+function tamaFeed() {
+  if (!tama || tama.isDead || tama.isSleeping) return;
+  if (tama.hunger >= 95) {
+    tama.overFedCount++;
+    if (tama.overFedCount >= 3) {
+      tama.happiness = Math.max(0, tama.happiness - 10);
+      tamaLog(tama.name + ' has a tummy ache from overeating!');
+      tama.overFedCount = 0;
+    } else {
+      tamaLog(tama.name + ' is already full!');
+    }
+    return;
+  }
+  tama.overFedCount = 0;
+  tama.hunger = Math.min(100, tama.hunger + 25);
+  tama.happiness = Math.min(100, tama.happiness + 3);
+  tama.lastFed = tama.age;
+  showThought('🍔');
+  animPet('bounce');
+  tamaLog('Fed ' + tama.name + '!');
+  tamaRender();
+}
+
+function tamaPlay() {
+  if (!tama || tama.isDead || tama.isSleeping) return;
+  if (tama.energy < 10) {
+    tamaLog(tama.name + ' is too tired to play!');
+    return;
+  }
+  tama.happiness = Math.min(100, tama.happiness + 20);
+  tama.energy = Math.max(0, tama.energy - 12);
+  tama.hunger = Math.max(0, tama.hunger - 5);
+  tama.lastPlayed = tama.age;
+  showThought('⚽');
+  animPet('happy');
+  tamaLog('Played with ' + tama.name + '!');
+  tamaRender();
+}
+
+function tamaSleep() {
+  if (!tama || tama.isDead) return;
+  if (tama.isSleeping) {
+    tama.isSleeping = false;
+    tamaLog(tama.name + ' was woken up!');
+  } else {
+    tama.isSleeping = true;
+    showThought('💤');
+    tamaLog(tama.name + ' is sleeping... zzz');
+  }
+  tamaRender();
+}
+
+function tamaClean() {
+  if (!tama || tama.isDead) return;
+  if (tama.poopCount === 0) {
+    tamaLog('Nothing to clean!');
+    return;
+  }
+  tama.poopCount = 0;
+  tama.poopPositions = [];
+  tama.happiness = Math.min(100, tama.happiness + 5);
+  clearPoops();
+  showThought('✨');
+  tamaLog('Cleaned up after ' + tama.name + '!');
+  tamaRender();
+}
+
+function tamaMedicine() {
+  if (!tama || tama.isDead || tama.isSleeping) return;
+  if (!tama.isSick) {
+    tamaLog(tama.name + ' doesn\'t need medicine!');
+    return;
+  }
+  tama.isSick = false;
+  tama.health = Math.min(100, tama.health + 20);
+  showThought('💊');
+  animPet('bounce');
+  tamaLog(tama.name + ' was healed!');
+  tamaRender();
+}
+
+// Rendering
+function tamaRender() {
+  if (!tama) return;
+  const pet = document.getElementById('tamaPet');
+  pet.textContent = tama.isSleeping ? tama.sprite : tama.sprite;
+  pet.className = 'tama-pet' + (tama.isSleeping ? ' sleeping' : '');
+
+  // Bars
+  setBar('hunger', tama.hunger, '#5cdb5c', '#ff4444');
+  setBar('happy', tama.happiness, '#ffd700', '#ff4444');
+  setBar('energy', tama.energy, '#6bdfff', '#ff4444');
+  setBar('health', tama.health, '#ff6b9d', '#880000');
+
+  // Mood icon
+  let mood = '😊';
+  if (tama.isDead) mood = '💀';
+  else if (tama.isSick) mood = '🤒';
+  else if (tama.isSleeping) mood = '😴';
+  else if (tama.hunger < 20 || tama.happiness < 20) mood = '😢';
+  else if (tama.happiness > 80 && tama.hunger > 60) mood = '😄';
+  document.getElementById('tama-mood-icon').textContent = mood;
+
+  // Stage label
+  document.getElementById('tama-stage-label').textContent = STAGES[tama.stage].name;
+
+  // Age display
+  const ageMin = tama.age;
+  document.getElementById('tamaAge').textContent = 'Age: ' + ageMin;
+
+  // Name
+  document.getElementById('tamaNameDisplay').textContent = tama.name || '???';
+
+  // Disable buttons when sleeping
+  const sleeping = tama.isSleeping;
+  document.getElementById('btn-feed').disabled = sleeping;
+  document.getElementById('btn-play').disabled = sleeping;
+  document.getElementById('btn-clean').disabled = sleeping;
+  document.getElementById('btn-med').disabled = sleeping;
+}
+
+function setBar(id, val, goodColor, badColor) {
+  const el = document.getElementById('bar-' + id);
+  el.style.width = val + '%';
+  el.style.background = val > 30 ? goodColor : badColor;
+}
+
+function renderPoops() {
+  clearPoops();
+  const screen = document.getElementById('tamaScreen');
+  tama.poopPositions.forEach(p => {
+    const el = document.createElement('div');
+    el.className = 'tama-poop';
+    el.textContent = '💩';
+    el.style.left = p.left + 'px';
+    screen.appendChild(el);
+  });
+}
+
+function clearPoops() {
+  document.querySelectorAll('.tama-poop').forEach(el => el.remove());
+}
+
+function showThought(emoji) {
+  const el = document.getElementById('tamThought');
+  el.textContent = emoji;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 1500);
+}
+
+function animPet(type) {
+  const pet = document.getElementById('tamaPet');
+  pet.classList.remove('bounce','happy','sad');
+  void pet.offsetWidth; // reflow
+  pet.classList.add(type);
+}
+
+function tamaLog(msg) {
+  const log = document.getElementById('tamaLog');
+  const t = document.createElement('div');
+  t.textContent = '> ' + msg;
+  log.appendChild(t);
+  log.scrollTop = log.scrollHeight;
+}
+
+// Init Tamagotchi
+tamaNewPet();
+</script>
+</body>
+</html>
